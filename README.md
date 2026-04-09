@@ -149,9 +149,16 @@ Output format is compatible with Java FastQC v0.12.1:
 - Same module ordering and threshold logic
 - Same CLI flags (with minor naming convention differences for multi-word flags)
 
+## Citation
+
+If you use this project in academic work, please cite the original
+[FastQC](https://github.com/s-andrews/FastQC) release/publication.
+
 ## License
 
-GPL-3.0 (same as the original FastQC)
+This project is licensed under the GNU General Public License v3.0
+(`GPL-3.0`), consistent with the original
+[FastQC](https://github.com/s-andrews/FastQC) project it rewrites.
 
 ## Acknowledgements
 
