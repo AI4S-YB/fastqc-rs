@@ -1,0 +1,24 @@
+[package]
+name = "fastqc-rs"
+version = "0.12.1"
+edition = "2021"
+description = "A quality control tool for high throughput sequence data"
+license = "GPL-3.0"
+
+[[bin]]
+name = "fastqc-rs"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+flate2 = "1"
+bzip2 = "0.4"
+zip = "2"
+base64 = "0.22"
+thiserror = "2"
+rayon = "1"
+statrs = "0.17"
+
+[dev-dependencies]
+tempfile = "3"
+pretty_assertions = "1"
