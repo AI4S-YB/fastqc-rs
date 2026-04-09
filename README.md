@@ -114,7 +114,7 @@ Optimizations applied: zlib-rs decompression backend, reader/processor pipeline 
 
 > Tested on Linux 6.6 (WSL2). Pipeline uses 2 threads (reader + processor). CPU utilization ~117%. Bottleneck is module processing (~85% of wall time).
 
-### Optimized v2 (data-parallel multi-threaded processing)
+### Optimized v2 (data-parallel multi-threaded processing, output bug) `#0458a08`
 
 Added data-parallel architecture: 1 reader thread + 4 worker threads, each with independent module copies. Workers process sequence subsets in parallel, results merged after completion.
 
@@ -123,17 +123,29 @@ Added data-parallel architecture: 1 reader thread + 4 worker threads, each with 
 | SPL1E1_raw_1.fastq.gz (1.15 GB) | 48.6s | 9.4s | **5.2x** | **5.0x** |
 | SPL1E1_raw_2.fastq.gz (1.20 GB) | 47.6s | 9.4s | **5.1x** | **4.9x** |
 
-> Tested on Linux 6.6 (WSL2). Uses 5 threads total (1 reader + 4 workers). CPU utilization ~500%. All PASS/WARN/FAIL assessments remain correct.
+> This version was fast, but not output-compatible. Multi-threaded duplication tracking changed the original FastQC semantics, and per-sequence quality bucketing still used Rust-side rounding instead of Java truncation.
+
+### Optimized v2 fixed (reader-ordered duplication + Java-compatible bucketing) `#3fdd3b9`
+
+Keeps the 1 reader + 4 worker architecture, but moves duplication tracking back to the reader thread so it preserves original file order. Also restores Java-compatible per-sequence quality bucketing and more closely matches Java number formatting.
+
+| File | FastQC v0.12.1 (Java) | fastqc-rs (fixed multi-threaded) | Speedup vs Java | Speedup vs baseline |
+|------|----------------------|----------------------------------|-----------------|---------------------|
+| SPL1E1_raw_1.fastq.gz (1.15 GB) | 48.6s | 13.0s | **3.7x** | **3.6x** |
+| SPL1E1_raw_2.fastq.gz (1.20 GB) | 47.6s | 13.7s | **3.5x** | **3.3x** |
+
+> Tested on Linux 6.6 (WSL2). Uses 5 threads total (1 reader + 4 workers). `summary.txt` matches Java FastQC exactly, `Per sequence quality scores` matches exactly, and `Sequence Duplication Levels` now differs only in floating-point tail digits.
 
 ## Compatibility
 
 Output format is compatible with Java FastQC v0.12.1:
 - `summary.txt` — identical (PASS/WARN/FAIL per module match exactly)
 - `fastqc_data.txt` — nearly identical with minor differences:
-  - **Per sequence quality scores**: Rust uses proper rounding (`round()`) for per-read mean quality, while Java uses integer division (truncation). This shifts some reads to adjacent quality bins but does not affect the overall PASS/WARN/FAIL assessment.
-  - **Number formatting**: Rust outputs small values in decimal notation (e.g., `0.000123`) while Java uses scientific notation (e.g., `1.23E-4`). Values are numerically equivalent.
-  - **Floating-point precision**: Last 1-2 digits may differ due to f64 vs Java double rounding.
-- Modules with identical data: Basic Statistics, Per Base Sequence Quality, Per Sequence GC Content, Sequence Length Distribution, Overrepresented Sequences
+  - **Per sequence quality scores**: Matches Java FastQC exactly after restoring Java-style truncation for per-read mean quality.
+  - **Sequence Duplication Levels**: PASS/WARN/FAIL status matches exactly; remaining differences are limited to floating-point tail digits in the deduplicated percentage and related percentages.
+  - **Number formatting**: Small and large values are formatted closer to Java style, including scientific notation where applicable.
+  - **Floating-point precision**: Some modules still differ only in the last 1-2 digits due to f64 vs Java double rounding.
+- Modules with identical or effectively identical data: Basic Statistics, Per Base Sequence Quality, Per Sequence Quality Scores, Per Sequence GC Content, Sequence Length Distribution, Overrepresented Sequences, Sequence Duplication Levels
 - Same module ordering and threshold logic
 - Same CLI flags (with minor naming convention differences for multi-word flags)
 
