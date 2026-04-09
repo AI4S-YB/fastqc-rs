@@ -20,7 +20,7 @@ A Rust implementation of [FastQC](https://www.bioinformatics.babraham.ac.uk/proj
 
 - **Input formats**: FASTQ (plain, gzip, bzip2), BAM, SAM
 - **Output**: HTML report with SVG graphs, ZIP archive, `fastqc_data.txt`, `summary.txt`
-- **Output compatibility**: Text reports (`fastqc_data.txt`) are byte-identical to Java FastQC output
+- **Output compatibility**: Text reports match Java FastQC output (identical PASS/WARN/FAIL, near-identical data values)
 - **Multi-file parallel processing** via rayon
 - **Single binary** with embedded configuration files
 
@@ -92,11 +92,26 @@ For each input file `sample.fastq.gz`, produces:
   - `Icons/` — Status icons
   - `Images/` — SVG graphs
 
+## Performance
+
+Benchmarked on a paired-end Illumina dataset (~1.15 GB / ~1.20 GB gzipped FASTQ, ~9.9M reads x 150bp):
+
+| File | FastQC v0.12.1 (Java) | fastqc-rs (Rust) | Speedup |
+|------|----------------------|------------------|---------|
+| SPL1E1_raw_1.fastq.gz (1.15 GB) | 48.6s | 46.8s | 1.04x |
+| SPL1E1_raw_2.fastq.gz (1.20 GB) | 47.6s | 45.7s | 1.04x |
+
+> Tested on Linux 6.6 (WSL2), single-threaded. Both tools produce equivalent quality assessments (identical PASS/WARN/FAIL for all modules).
+
 ## Compatibility
 
-Output format is fully compatible with Java FastQC v0.12.1:
-- `fastqc_data.txt` is identical (verified against golden test files)
-- `summary.txt` uses the same PASS/WARN/FAIL format
+Output format is compatible with Java FastQC v0.12.1:
+- `summary.txt` — identical (PASS/WARN/FAIL per module match exactly)
+- `fastqc_data.txt` — nearly identical with minor differences:
+  - **Per sequence quality scores**: Rust uses proper rounding (`round()`) for per-read mean quality, while Java uses integer division (truncation). This shifts some reads to adjacent quality bins but does not affect the overall PASS/WARN/FAIL assessment.
+  - **Number formatting**: Rust outputs small values in decimal notation (e.g., `0.000123`) while Java uses scientific notation (e.g., `1.23E-4`). Values are numerically equivalent.
+  - **Floating-point precision**: Last 1-2 digits may differ due to f64 vs Java double rounding.
+- Modules with identical data: Basic Statistics, Per Base Sequence Quality, Per Sequence GC Content, Sequence Length Distribution, Overrepresented Sequences
 - Same module ordering and threshold logic
 - Same CLI flags (with minor naming convention differences for multi-word flags)
 
