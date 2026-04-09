@@ -91,7 +91,7 @@ fn process_bam(
 const NUM_WORKERS: usize = 4;
 
 /// Process FASTQ files using data-parallel pipeline:
-/// - 1 reader thread decompresses and parses FASTQ
+/// - 1 reader thread decompresses + parses FASTQ + tracks deduplication in file order
 /// - N worker threads each process sequences through their own module copies
 /// - After completion, merge all worker modules into the primary set
 fn process_fastq_pipeline(
@@ -109,8 +109,16 @@ fn process_fastq_pipeline(
     }
 
     let module_config = ModuleConfig::load(config);
+    let duplication_idx = modules
+        .iter()
+        .position(|m| m.name() == "Sequence Duplication Levels")
+        .expect("duplication module must exist");
+    let overrep_idx = modules
+        .iter()
+        .position(|m| m.name() == "Overrepresented sequences")
+        .expect("overrepresented module must exist");
 
-    let reader_result = std::thread::scope(|s| {
+    let (reader_result, worker_results) = std::thread::scope(|s| {
         // Create per-worker channels
         let mut worker_txs = Vec::with_capacity(NUM_WORKERS);
         let mut worker_handles = Vec::with_capacity(NUM_WORKERS);
@@ -125,7 +133,12 @@ fn process_fastq_pipeline(
                 let mut mods = worker_modules;
                 for batch in rx.iter() {
                     for seq in &batch {
-                        for module in mods.iter_mut() {
+                        for (module_idx, module) in mods.iter_mut().enumerate() {
+                            // Duplication-related modules must observe the original
+                            // file order, so the reader thread owns them.
+                            if module_idx == duplication_idx || module_idx == overrep_idx {
+                                continue;
+                            }
                             if seq.is_filtered && module.ignore_filtered_sequences() {
                                 continue;
                             }
@@ -138,7 +151,9 @@ fn process_fastq_pipeline(
             worker_handles.push(handle);
         }
 
-        // Reader thread: decompress + parse, distribute round-robin to workers
+        // Reader thread: decompress + parse + track deduplication sequentially.
+        let overrep_module = &mut modules[overrep_idx];
+        let overrep_ignores_filtered = overrep_module.ignore_filtered_sequences();
         let reader_handle = s.spawn(move || -> Result<()> {
             let mut reader = FastqReader::new(path, config)?;
             let mut batch = Vec::with_capacity(BATCH_SIZE);
@@ -147,6 +162,9 @@ fn process_fastq_pipeline(
             loop {
                 match reader.read_sequence() {
                     Ok(Some(seq)) => {
+                        if !(seq.is_filtered && overrep_ignores_filtered) {
+                            overrep_module.process_sequence(&seq);
+                        }
                         batch.push(seq);
                         if batch.len() >= BATCH_SIZE {
                             if worker_txs[worker_idx].send(batch).is_err() {
@@ -173,29 +191,37 @@ fn process_fastq_pipeline(
         // Wait for reader
         let read_result = reader_handle.join().unwrap();
 
-        // Collect all worker modules and merge into primary
-        let mut first = true;
+        // Collect worker results after the reader finishes and closes the channels.
+        let mut worker_results = Vec::with_capacity(NUM_WORKERS);
         for handle in worker_handles {
-            let worker_mods = handle.join().unwrap();
-            if first {
-                // Replace primary modules with first worker's modules
-                // (this avoids merging into empty modules)
-                for (i, wmod) in worker_mods.into_iter().enumerate() {
-                    modules[i] = wmod;
-                }
-                first = false;
-            } else {
-                // Merge subsequent workers into primary
-                for (i, wmod) in worker_mods.into_iter().enumerate() {
-                    modules[i].merge(wmod.into_any());
-                }
-            }
+            worker_results.push(handle.join().unwrap());
         }
 
-        read_result
+        (read_result, worker_results)
     });
 
     reader_result?;
+
+    // Merge worker-local modules back into the primary module set.
+    let mut first = true;
+    for worker_mods in worker_results {
+        if first {
+            for (i, wmod) in worker_mods.into_iter().enumerate() {
+                if i == duplication_idx || i == overrep_idx {
+                    continue;
+                }
+                modules[i] = wmod;
+            }
+            first = false;
+        } else {
+            for (i, wmod) in worker_mods.into_iter().enumerate() {
+                if i == duplication_idx || i == overrep_idx {
+                    continue;
+                }
+                modules[i].merge(wmod.into_any());
+            }
+        }
+    }
 
     if !config.quiet {
         eprintln!("{}  processing complete", file_name);

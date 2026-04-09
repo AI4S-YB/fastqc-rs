@@ -78,7 +78,8 @@ impl QcModule for PerSequenceQualityScores {
         }
 
         let total: u64 = qual.iter().map(|&c| c as u64).sum();
-        let avg = (total as f64 / qual.len() as f64).round() as i32;
+        // Match Java FastQC's integer division semantics.
+        let avg = (total as f64 / qual.len() as f64) as i32;
 
         *self.quality_distribution.entry(avg).or_insert(0.0) += 1.0;
     }
