@@ -20,10 +20,7 @@ impl ContaminantFinder {
             }
             let parts: Vec<&str> = line.splitn(2, '\t').collect();
             if parts.len() == 2 {
-                contaminants.push((
-                    parts[0].trim().to_string(),
-                    parts[1].trim().to_string(),
-                ));
+                contaminants.push((parts[0].trim().to_string(), parts[1].trim().to_string()));
             } else {
                 // Try splitting on whitespace
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -75,7 +72,9 @@ impl ContaminantFinder {
 
             // Try aligning the contaminant at each position in the query
             for offset in 0..=(query_bytes.len().saturating_sub(min_len)) {
-                let check_len = min_len.min(query_bytes.len() - offset).min(cont_bytes.len());
+                let check_len = min_len
+                    .min(query_bytes.len() - offset)
+                    .min(cont_bytes.len());
                 let mut mismatches = 0;
                 for i in 0..check_len {
                     if query_bytes[offset + i] != cont_bytes[i] {

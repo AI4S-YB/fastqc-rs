@@ -1,9 +1,9 @@
-pub mod fastq;
-pub mod phred;
+pub mod bam;
 pub mod colorspace;
 pub mod contaminant;
-pub mod bam;
+pub mod fastq;
 pub mod file_group;
+pub mod phred;
 
 /// Core sequence data structure, equivalent to Java's Sequence class.
 #[derive(Debug, Clone)]
@@ -17,10 +17,12 @@ pub struct Sequence {
 }
 
 impl Sequence {
-    pub fn new(id: String, sequence: String, quality: String, file_name: String) -> Self {
+    pub fn new(id: String, mut sequence: String, quality: String, file_name: String) -> Self {
+        // In-place uppercase avoids allocating a second String (to_uppercase creates a new one)
+        sequence.make_ascii_uppercase();
         Self {
             id,
-            sequence: sequence.to_uppercase(),
+            sequence,
             quality,
             colorspace: None,
             is_filtered: false,
@@ -30,14 +32,15 @@ impl Sequence {
 
     pub fn with_colorspace(
         id: String,
-        sequence: String,
+        mut sequence: String,
         colorspace: String,
         quality: String,
         file_name: String,
     ) -> Self {
+        sequence.make_ascii_uppercase();
         Self {
             id,
-            sequence: sequence.to_uppercase(),
+            sequence,
             quality,
             colorspace: Some(colorspace),
             is_filtered: false,

@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::any::Any;
+
+use ahash::AHashMap;
 
 use crate::error::Result;
 use crate::modules::{ModuleConfig, QcModule};
@@ -7,7 +9,7 @@ use crate::sequence::phred::PhredEncoding;
 use crate::sequence::Sequence;
 
 pub struct PerSequenceQualityScores {
-    quality_distribution: HashMap<i32, f64>,
+    quality_distribution: AHashMap<i32, f64>,
     lowest_char: u8,
     calculated: bool,
     most_frequent_score: i32,
@@ -19,7 +21,7 @@ pub struct PerSequenceQualityScores {
 impl PerSequenceQualityScores {
     pub fn new(module_config: &ModuleConfig) -> Self {
         Self {
-            quality_distribution: HashMap::new(),
+            quality_distribution: AHashMap::new(),
             lowest_char: 255,
             calculated: false,
             most_frequent_score: 0,
@@ -103,6 +105,22 @@ impl QcModule for PerSequenceQualityScores {
         adjusted < self.warn_threshold as i32
     }
 
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            for (score, count) in other.quality_distribution {
+                *self.quality_distribution.entry(score).or_insert(0.0) += count;
+            }
+            if other.lowest_char < self.lowest_char {
+                self.lowest_char = other.lowest_char;
+            }
+            self.calculated = false;
+        }
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate();
         let encoding = PhredEncoding::from_lowest_char(self.lowest_char);
@@ -113,8 +131,14 @@ impl QcModule for PerSequenceQualityScores {
         scores.sort();
 
         let adjusted_scores: Vec<f64> = scores.iter().map(|&s| (s - offset) as f64).collect();
-        let counts: Vec<f64> = scores.iter().map(|&s| self.quality_distribution[&s]).collect();
-        let x_labels: Vec<String> = adjusted_scores.iter().map(|s| format!("{}", *s as i32)).collect();
+        let counts: Vec<f64> = scores
+            .iter()
+            .map(|&s| self.quality_distribution[&s])
+            .collect();
+        let x_labels: Vec<String> = adjusted_scores
+            .iter()
+            .map(|s| format!("{}", *s as i32))
+            .collect();
 
         let max_count = counts.iter().cloned().fold(0.0f64, f64::max);
 
@@ -135,7 +159,11 @@ impl QcModule for PerSequenceQualityScores {
         data.push_str("#Quality\tCount\n");
         for &score in &scores {
             let adjusted = score - offset;
-            data.push_str(&format!("{}\t{}\n", adjusted, crate::format_double(self.quality_distribution[&score])));
+            data.push_str(&format!(
+                "{}\t{}\n",
+                adjusted,
+                crate::format_double(self.quality_distribution[&score])
+            ));
         }
 
         Ok(())

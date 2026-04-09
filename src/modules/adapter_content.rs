@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::graphs::base_group;
@@ -112,7 +114,12 @@ impl AdapterContent {
             return;
         }
 
-        let max_length = self.adapters.iter().map(|a| a.positions.len()).max().unwrap_or(0);
+        let max_length = self
+            .adapters
+            .iter()
+            .map(|a| a.positions.len())
+            .max()
+            .unwrap_or(0);
         let groups = base_group::make_base_groups(max_length, config);
 
         self.x_labels = groups.iter().map(|g| g.to_string()).collect();
@@ -219,6 +226,32 @@ impl QcModule for AdapterContent {
             }
         }
         false
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            for (i, other_adapter) in other.adapters.iter().enumerate() {
+                if i < self.adapters.len() {
+                    let max_len = self.adapters[i]
+                        .positions
+                        .len()
+                        .max(other_adapter.positions.len());
+                    self.adapters[i].positions.resize(max_len, 0);
+                    for (j, &v) in other_adapter.positions.iter().enumerate() {
+                        self.adapters[i].positions[j] += v;
+                    }
+                }
+            }
+            self.total_count += other.total_count;
+            if other.longest_sequence > self.longest_sequence {
+                self.longest_sequence = other.longest_sequence;
+            }
+            self.calculated = false;
+        }
     }
 
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {

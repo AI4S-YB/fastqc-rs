@@ -90,6 +90,16 @@ impl QualityCount {
     }
 }
 
+impl QualityCount {
+    /// Merge another QualityCount's data into this one (element-wise addition).
+    pub fn merge_from(&mut self, other: &QualityCount) {
+        for i in 0..150 {
+            self.actual_counts[i] += other.actual_counts[i];
+        }
+        self.total_counts += other.total_counts;
+    }
+}
+
 impl Default for QualityCount {
     fn default() -> Self {
         Self::new()

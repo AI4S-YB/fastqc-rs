@@ -1,8 +1,10 @@
+use std::any::Any;
+
 use crate::error::Result;
 use crate::modules::QcModule;
 use crate::report::ReportArchive;
-use crate::sequence::Sequence;
 use crate::sequence::phred::PhredEncoding;
+use crate::sequence::Sequence;
 
 pub struct BasicStats {
     name: Option<String>,
@@ -164,6 +166,40 @@ impl QcModule for BasicStats {
         false
     }
 
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            self.actual_count += other.actual_count;
+            self.filtered_count += other.filtered_count;
+            self.total_bases += other.total_bases;
+            self.g_count += other.g_count;
+            self.c_count += other.c_count;
+            self.a_count += other.a_count;
+            self.t_count += other.t_count;
+            self.n_count += other.n_count;
+
+            if other.min_length > 0 && (self.min_length == 0 || other.min_length < self.min_length)
+            {
+                self.min_length = other.min_length;
+            }
+            if other.max_length > self.max_length {
+                self.max_length = other.max_length;
+            }
+            if other.lowest_char < self.lowest_char {
+                self.lowest_char = other.lowest_char;
+            }
+            if self.name.is_none() {
+                self.name = other.name;
+            }
+            if self.file_type.is_none() {
+                self.file_type = other.file_type;
+            }
+        }
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         let encoding = PhredEncoding::from_lowest_char(self.lowest_char);
         let gc_percent = if self.a_count + self.t_count + self.g_count + self.c_count > 0 {
@@ -187,7 +223,9 @@ impl QcModule for BasicStats {
         data.push_str(&format!("Filename\t{}\n", name));
         data.push_str(&format!(
             "File type\t{}\n",
-            self.file_type.as_deref().unwrap_or("Conventional base calls")
+            self.file_type
+                .as_deref()
+                .unwrap_or("Conventional base calls")
         ));
         data.push_str(&format!("Encoding\t{}\n", encoding));
         data.push_str(&format!("Total Sequences\t{}\n", self.actual_count));
@@ -223,10 +261,7 @@ impl QcModule for BasicStats {
             ("Sequence length", seq_length.clone()),
             ("%GC", gc_percent.to_string()),
         ] {
-            html.push_str(&format!(
-                "<tr><td>{}</td><td>{}</td></tr>",
-                measure, value
-            ));
+            html.push_str(&format!("<tr><td>{}</td><td>{}</td></tr>", measure, value));
         }
         html.push_str("</tbody></table>");
 

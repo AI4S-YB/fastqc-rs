@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::any::Any;
 use std::sync::{Arc, Mutex};
+
+use ahash::AHashMap;
 
 use crate::error::Result;
 use crate::modules::overrepresented_seqs::SharedDuplicationData;
@@ -24,8 +26,8 @@ impl DuplicationLevel {
             total_percentages: None,
             percent_different_seqs: 0.0,
             labels: [
-                "1", "2", "3", "4", "5", "6", "7", "8", "9",
-                ">10", ">50", ">100", ">500", ">1k", ">5k", ">10k",
+                "1", "2", "3", "4", "5", "6", "7", "8", "9", ">10", ">50", ">100", ">500", ">1k",
+                ">5k", ">10k",
             ],
             ignore: module_config.get_param("duplication", "ignore") > 0.0,
             warn_threshold: module_config.get_param("duplication", "warn"),
@@ -42,20 +44,16 @@ impl DuplicationLevel {
         let mut total_percentages = [0.0f64; 16];
 
         // Collate counts: how many sequences have each duplication level
-        let mut collated_counts: HashMap<u64, u64> = HashMap::new();
+        let mut collated_counts: AHashMap<u64, u64> = AHashMap::new();
         for &count in data.sequences.values() {
             *collated_counts.entry(count).or_insert(0) += 1;
         }
 
         // Apply Bayesian correction
-        let mut corrected_counts: HashMap<u64, f64> = HashMap::new();
+        let mut corrected_counts: AHashMap<u64, f64> = AHashMap::new();
         for (&dup_level, &num_obs) in &collated_counts {
-            let corrected = get_corrected_count(
-                data.count_at_unique_limit,
-                data.count,
-                dup_level,
-                num_obs,
-            );
+            let corrected =
+                get_corrected_count(data.count_at_unique_limit, data.count, dup_level, num_obs);
             corrected_counts.insert(dup_level, corrected);
         }
 
@@ -169,6 +167,14 @@ impl QcModule for DuplicationLevel {
     fn raises_warning(&mut self) -> bool {
         self.calculate_levels();
         self.percent_different_seqs < self.warn_threshold
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, _other: Box<dyn Any + Send>) {
+        // No-op: DuplicationLevel reads from shared OverRepresentedSeqs data at report time.
     }
 
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {

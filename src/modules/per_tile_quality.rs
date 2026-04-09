@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::any::Any;
+
+use ahash::AHashMap;
 
 use crate::error::Result;
 use crate::graphs::base_group;
@@ -9,7 +11,7 @@ use crate::sequence::phred::PhredEncoding;
 use crate::sequence::Sequence;
 
 pub struct PerTileQualityScores {
-    per_tile_quality_counts: HashMap<i32, Vec<QualityCount>>,
+    per_tile_quality_counts: AHashMap<i32, Vec<QualityCount>>,
     current_length: usize,
     total_count: u64,
     split_position: Option<usize>,
@@ -27,7 +29,7 @@ pub struct PerTileQualityScores {
 impl PerTileQualityScores {
     pub fn new(module_config: &ModuleConfig) -> Self {
         Self {
-            per_tile_quality_counts: HashMap::new(),
+            per_tile_quality_counts: AHashMap::new(),
             current_length: 0,
             total_count: 0,
             split_position: None,
@@ -263,6 +265,33 @@ impl QcModule for PerTileQualityScores {
         self.max_deviation > self.warn_threshold
     }
 
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            for (tile, other_counts) in other.per_tile_quality_counts {
+                if let Some(self_counts) = self.per_tile_quality_counts.get_mut(&tile) {
+                    // Merge element-wise, extending if needed
+                    let max_len = self_counts.len().max(other_counts.len());
+                    self_counts.resize_with(max_len, QualityCount::new);
+                    for (i, other_qc) in other_counts.iter().enumerate() {
+                        self_counts[i].merge_from(other_qc);
+                    }
+                } else {
+                    self.per_tile_quality_counts.insert(tile, other_counts);
+                }
+            }
+
+            if other.current_length > self.current_length {
+                self.current_length = other.current_length;
+            }
+            self.total_count += other.total_count;
+            self.calculated = false;
+        }
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate(&report.config);
 
@@ -280,7 +309,12 @@ impl QcModule for PerTileQualityScores {
         data.push_str("#Tile\tBase\tMean\n");
         for (t, &tile) in self.tiles.iter().enumerate() {
             for i in 0..self.means[t].len() {
-                data.push_str(&format!("{}\t{}\t{}\n", tile, self.x_labels[i], crate::format_double(self.means[t][i])));
+                data.push_str(&format!(
+                    "{}\t{}\t{}\n",
+                    tile,
+                    self.x_labels[i],
+                    crate::format_double(self.means[t][i])
+                ));
             }
         }
 

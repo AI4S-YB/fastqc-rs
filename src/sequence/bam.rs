@@ -173,11 +173,10 @@ impl BamReader {
 
         // SAM quality scores
         let sam_qual = record.quality_scores();
-        let mut qualities: String =
-            noodles::sam::alignment::record::QualityScores::iter(&sam_qual)
-                .filter_map(|r| r.ok())
-                .map(|q| (q + 33) as char)
-                .collect();
+        let mut qualities: String = noodles::sam::alignment::record::QualityScores::iter(&sam_qual)
+            .filter_map(|r| r.ok())
+            .map(|q| (q + 33) as char)
+            .collect();
 
         if qualities.is_empty() && seq_len > 0 {
             qualities = "!".repeat(seq_len);
@@ -185,11 +184,10 @@ impl BamReader {
 
         if only_mapped && !flags.is_unmapped() {
             let cigar = record.cigar();
-            let ops: Vec<(CigarOp, usize)> =
-                noodles::sam::alignment::record::Cigar::iter(&cigar)
-                    .filter_map(|r| r.ok())
-                    .map(|op| (op.kind(), op.len()))
-                    .collect();
+            let ops: Vec<(CigarOp, usize)> = noodles::sam::alignment::record::Cigar::iter(&cigar)
+                .filter_map(|r| r.ok())
+                .map(|op| (op.kind(), op.len()))
+                .collect();
 
             if !ops.is_empty() {
                 if let Some(&(CigarOp::SoftClip, clip_len)) = ops.last() {

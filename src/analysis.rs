@@ -1,18 +1,27 @@
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 use crate::config::Config;
 use crate::error::Result;
-use crate::modules::{self, QcModule, ModuleConfig};
+use crate::modules::{self, ModuleConfig, QcModule};
 use crate::report::ReportArchive;
-use crate::report::{html, text_report, summary};
-use crate::sequence::fastq::FastqReader;
+use crate::report::{html, summary, text_report};
 use crate::sequence::bam::BamReader;
+use crate::sequence::fastq::FastqReader;
+use crate::sequence::Sequence;
 use crate::sequence::SequenceFile;
+
+/// Batch size for the pipeline channel.
+/// 4096 sequences per batch balances throughput vs memory (~1.6 MB per batch for 150bp reads).
+const BATCH_SIZE: usize = 4096;
+
+/// Channel buffer size (number of batches). 16 batches ≈ 6 MB of buffered sequences.
+const CHANNEL_BUFFER: usize = 16;
 
 /// Process a single file (or file group) and generate reports.
 pub fn process_file(path: &Path, config: &Config) -> Result<()> {
@@ -22,53 +31,15 @@ pub fn process_file(path: &Path, config: &Config) -> Result<()> {
     // Determine file type and create reader
     let format = detect_format(path, config);
 
-    let mut seq_count: u64 = 0;
-    let mut last_percent: u8 = 0;
     let file_name: String;
 
     match format.as_str() {
         "bam" | "sam" | "bam_mapped" | "sam_mapped" => {
             let only_mapped = format == "bam_mapped" || format == "sam_mapped";
-            let mut reader = BamReader::new(path, config, only_mapped)?;
-            file_name = reader.name().to_string();
-            loop {
-                let pct = reader.percent_complete();
-                match reader.next() {
-                    Some(Ok(seq)) => {
-                        seq_count += 1;
-                        for module in modules.iter_mut() {
-                            if seq.is_filtered && module.ignore_filtered_sequences() {
-                                continue;
-                            }
-                            module.process_sequence(&seq);
-                        }
-                        report_progress(config, &file_name, seq_count, pct, &mut last_percent);
-                    }
-                    Some(Err(e)) => return Err(e),
-                    None => break,
-                }
-            }
+            file_name = process_bam(path, config, only_mapped, &mut modules)?;
         }
         _ => {
-            let mut reader = FastqReader::new(path, config)?;
-            file_name = reader.name().to_string();
-            loop {
-                let pct = reader.percent_complete();
-                match reader.next() {
-                    Some(Ok(seq)) => {
-                        seq_count += 1;
-                        for module in modules.iter_mut() {
-                            if seq.is_filtered && module.ignore_filtered_sequences() {
-                                continue;
-                            }
-                            module.process_sequence(&seq);
-                        }
-                        report_progress(config, &file_name, seq_count, pct, &mut last_percent);
-                    }
-                    Some(Err(e)) => return Err(e),
-                    None => break,
-                }
-            }
+            file_name = process_fastq_pipeline(path, config, &mut modules)?;
         }
     }
 
@@ -80,6 +51,189 @@ pub fn process_file(path: &Path, config: &Config) -> Result<()> {
     generate_reports(path, &file_name, &mut modules, config)?;
 
     Ok(())
+}
+
+/// Process BAM/SAM files (sequential, as before).
+fn process_bam(
+    path: &Path,
+    config: &Config,
+    only_mapped: bool,
+    modules: &mut Vec<Box<dyn QcModule>>,
+) -> Result<String> {
+    let mut reader = BamReader::new(path, config, only_mapped)?;
+    let file_name = reader.name().to_string();
+    let mut seq_count: u64 = 0;
+    let mut last_percent: u8 = 0;
+
+    loop {
+        let pct = reader.percent_complete();
+        match reader.next() {
+            Some(Ok(seq)) => {
+                seq_count += 1;
+                for module in modules.iter_mut() {
+                    if seq.is_filtered && module.ignore_filtered_sequences() {
+                        continue;
+                    }
+                    module.process_sequence(&seq);
+                }
+                report_progress(config, &file_name, seq_count, pct, &mut last_percent);
+            }
+            Some(Err(e)) => return Err(e),
+            None => break,
+        }
+    }
+
+    Ok(file_name)
+}
+
+/// Number of worker threads for data-parallel module processing.
+/// Each worker gets its own module set and processes a subset of sequences.
+const NUM_WORKERS: usize = 4;
+
+/// Process FASTQ files using data-parallel pipeline:
+/// - 1 reader thread decompresses and parses FASTQ
+/// - N worker threads each process sequences through their own module copies
+/// - After completion, merge all worker modules into the primary set
+fn process_fastq_pipeline(
+    path: &Path,
+    config: &Config,
+    modules: &mut Vec<Box<dyn QcModule>>,
+) -> Result<String> {
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if file_name == "stdin" || path.to_string_lossy() == "stdin" {
+        return process_fastq_sequential(path, config, modules);
+    }
+
+    let module_config = ModuleConfig::load(config);
+
+    let reader_result = std::thread::scope(|s| {
+        // Create per-worker channels
+        let mut worker_txs = Vec::with_capacity(NUM_WORKERS);
+        let mut worker_handles = Vec::with_capacity(NUM_WORKERS);
+
+        for _ in 0..NUM_WORKERS {
+            let (tx, rx) = mpsc::sync_channel::<Vec<Sequence>>(CHANNEL_BUFFER);
+            worker_txs.push(tx);
+
+            // Each worker creates its own module set and processes independently
+            let worker_modules = modules::create_module_list(config, &module_config);
+            let handle = s.spawn(move || -> Vec<Box<dyn QcModule>> {
+                let mut mods = worker_modules;
+                for batch in rx.iter() {
+                    for seq in &batch {
+                        for module in mods.iter_mut() {
+                            if seq.is_filtered && module.ignore_filtered_sequences() {
+                                continue;
+                            }
+                            module.process_sequence(seq);
+                        }
+                    }
+                }
+                mods
+            });
+            worker_handles.push(handle);
+        }
+
+        // Reader thread: decompress + parse, distribute round-robin to workers
+        let reader_handle = s.spawn(move || -> Result<()> {
+            let mut reader = FastqReader::new(path, config)?;
+            let mut batch = Vec::with_capacity(BATCH_SIZE);
+            let mut worker_idx: usize = 0;
+
+            loop {
+                match reader.read_sequence() {
+                    Ok(Some(seq)) => {
+                        batch.push(seq);
+                        if batch.len() >= BATCH_SIZE {
+                            if worker_txs[worker_idx].send(batch).is_err() {
+                                break;
+                            }
+                            worker_idx = (worker_idx + 1) % NUM_WORKERS;
+                            batch = Vec::with_capacity(BATCH_SIZE);
+                        }
+                    }
+                    Ok(None) => {
+                        if !batch.is_empty() {
+                            let _ = worker_txs[worker_idx].send(batch);
+                        }
+                        break;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            // Drop all senders to signal workers to finish
+            drop(worker_txs);
+            Ok(())
+        });
+
+        // Wait for reader
+        let read_result = reader_handle.join().unwrap();
+
+        // Collect all worker modules and merge into primary
+        let mut first = true;
+        for handle in worker_handles {
+            let worker_mods = handle.join().unwrap();
+            if first {
+                // Replace primary modules with first worker's modules
+                // (this avoids merging into empty modules)
+                for (i, wmod) in worker_mods.into_iter().enumerate() {
+                    modules[i] = wmod;
+                }
+                first = false;
+            } else {
+                // Merge subsequent workers into primary
+                for (i, wmod) in worker_mods.into_iter().enumerate() {
+                    modules[i].merge(wmod.into_any());
+                }
+            }
+        }
+
+        read_result
+    });
+
+    reader_result?;
+
+    if !config.quiet {
+        eprintln!("{}  processing complete", file_name);
+    }
+
+    Ok(file_name)
+}
+
+/// Sequential FASTQ processing fallback (for stdin).
+fn process_fastq_sequential(
+    path: &Path,
+    config: &Config,
+    modules: &mut Vec<Box<dyn QcModule>>,
+) -> Result<String> {
+    let mut reader = FastqReader::new(path, config)?;
+    let file_name = reader.name().to_string();
+    let mut seq_count: u64 = 0;
+    let mut last_percent: u8 = 0;
+
+    loop {
+        let pct = reader.percent_complete();
+        match reader.next() {
+            Some(Ok(seq)) => {
+                seq_count += 1;
+                for module in modules.iter_mut() {
+                    if seq.is_filtered && module.ignore_filtered_sequences() {
+                        continue;
+                    }
+                    module.process_sequence(&seq);
+                }
+                report_progress(config, &file_name, seq_count, pct, &mut last_percent);
+            }
+            Some(Err(e)) => return Err(e),
+            None => break,
+        }
+    }
+
+    Ok(file_name)
 }
 
 fn detect_format(path: &Path, config: &Config) -> String {
@@ -168,9 +322,18 @@ fn generate_reports(
 
     // Write icons
     let icons = [
-        ("fastqc_icon.png", include_bytes!("data/icons/fastqc_icon.png").as_slice()),
-        ("warning.png", include_bytes!("data/icons/warning.png").as_slice()),
-        ("error.png", include_bytes!("data/icons/error.png").as_slice()),
+        (
+            "fastqc_icon.png",
+            include_bytes!("data/icons/fastqc_icon.png").as_slice(),
+        ),
+        (
+            "warning.png",
+            include_bytes!("data/icons/warning.png").as_slice(),
+        ),
+        (
+            "error.png",
+            include_bytes!("data/icons/error.png").as_slice(),
+        ),
         ("tick.png", include_bytes!("data/icons/tick.png").as_slice()),
     ];
     for (name, data) in &icons {

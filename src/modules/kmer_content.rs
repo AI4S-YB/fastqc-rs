@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::any::Any;
+
+use ahash::AHashMap;
 
 use crate::config::Config;
 use crate::error::Result;
@@ -37,7 +39,10 @@ impl Kmer {
     }
 
     fn max_obs_exp(&self) -> f32 {
-        self.obs_exp_positions.iter().cloned().fold(0.0f32, f32::max)
+        self.obs_exp_positions
+            .iter()
+            .cloned()
+            .fold(0.0f32, f32::max)
     }
 
     fn max_position(&self) -> usize {
@@ -49,12 +54,16 @@ impl Kmer {
                 pos = i + 1;
             }
         }
-        if pos == 0 { 1 } else { pos }
+        if pos == 0 {
+            1
+        } else {
+            pos
+        }
     }
 }
 
 pub struct KmerContent {
-    kmers: HashMap<String, Kmer>,
+    kmers: AHashMap<String, Kmer>,
     total_kmer_counts: Vec<Vec<u64>>,
     longest_sequence: usize,
     skip_count: u64,
@@ -83,7 +92,7 @@ impl KmerContent {
     pub fn new(config: &Config, module_config: &ModuleConfig) -> Self {
         let kmer_size = config.kmer_size.unwrap_or(7);
         Self {
-            kmers: HashMap::new(),
+            kmers: AHashMap::new(),
             total_kmer_counts: Vec::new(),
             longest_sequence: 0,
             skip_count: 0,
@@ -265,8 +274,7 @@ fn erfc(x: f64) -> f64 {
     let t = 1.0 / (1.0 + 0.3275911 * x.abs());
     let poly = t
         * (0.254829592
-            + t * (-0.284496736
-                + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+            + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
     let result = poly * (-x * x).exp();
     if x >= 0.0 {
         result
@@ -336,8 +344,10 @@ impl QcModule for KmerContent {
             if let Some(k) = self.kmers.get_mut(kmer) {
                 k.increment_count(i);
             } else {
-                self.kmers
-                    .insert(kmer.to_string(), Kmer::new(kmer.to_string(), i, (s.len() - kmer_size) + 1));
+                self.kmers.insert(
+                    kmer.to_string(),
+                    Kmer::new(kmer.to_string(), i, (s.len() - kmer_size) + 1),
+                );
             }
         }
     }
@@ -370,6 +380,51 @@ impl QcModule for KmerContent {
         false
     }
 
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            // Merge kmers
+            for (seq, other_kmer) in other.kmers {
+                if let Some(self_kmer) = self.kmers.get_mut(&seq) {
+                    self_kmer.count += other_kmer.count;
+                    let max_len = self_kmer.positions.len().max(other_kmer.positions.len());
+                    self_kmer.positions.resize(max_len, 0);
+                    for (i, &v) in other_kmer.positions.iter().enumerate() {
+                        self_kmer.positions[i] += v;
+                    }
+                } else {
+                    self.kmers.insert(seq, other_kmer);
+                }
+            }
+
+            // Merge total_kmer_counts
+            let max_len = self
+                .total_kmer_counts
+                .len()
+                .max(other.total_kmer_counts.len());
+            self.total_kmer_counts
+                .resize_with(max_len, || vec![0u64; self.kmer_size]);
+            for (i, other_row) in other.total_kmer_counts.iter().enumerate() {
+                let self_row = &mut self.total_kmer_counts[i];
+                if self_row.len() < other_row.len() {
+                    self_row.resize(other_row.len(), 0);
+                }
+                for (j, &v) in other_row.iter().enumerate() {
+                    self_row[j] += v;
+                }
+            }
+
+            if other.longest_sequence > self.longest_sequence {
+                self.longest_sequence = other.longest_sequence;
+            }
+            self.skip_count += other.skip_count;
+            self.calculated = false;
+        }
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate_enrichment(&report.config);
 
@@ -393,9 +448,7 @@ impl QcModule for KmerContent {
         }
 
         if self.sorted_kmer_data.is_empty() {
-            report
-                .html_body
-                .push_str("<p>No overrepresented Kmers</p>");
+            report.html_body.push_str("<p>No overrepresented Kmers</p>");
         } else {
             report.html_body.push_str("<table><thead><tr><th>Sequence</th><th>Count</th><th>PValue</th><th>Obs/Exp Max</th><th>Max Obs/Exp Position</th></tr></thead><tbody>");
             for kmer in &self.sorted_kmer_data {

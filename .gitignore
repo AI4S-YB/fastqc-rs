@@ -3,3 +3,4 @@
 /.codex
 /fastqc/
 real-data
+benchmark_output/

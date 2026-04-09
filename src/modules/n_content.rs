@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use crate::error::Result;
 use crate::graphs::base_group;
 use crate::modules::{ModuleConfig, QcModule};
@@ -120,6 +122,27 @@ impl QcModule for NContent {
         self.check_threshold(self.warn_threshold)
     }
 
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            let max_len = self.n_counts.len().max(other.n_counts.len());
+            self.n_counts.resize(max_len, 0);
+            self.not_n_counts.resize(max_len, 0);
+
+            for (i, &v) in other.n_counts.iter().enumerate() {
+                self.n_counts[i] += v;
+            }
+            for (i, &v) in other.not_n_counts.iter().enumerate() {
+                self.not_n_counts[i] += v;
+            }
+
+            self.calculated = false;
+        }
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate(&report.config);
 
@@ -140,7 +163,11 @@ impl QcModule for NContent {
         let data = &mut report.data;
         data.push_str("#Base\tN-Count\n");
         for i in 0..self.x_labels.len() {
-            data.push_str(&format!("{}\t{}\n", self.x_labels[i], crate::format_double(self.percentages[i])));
+            data.push_str(&format!(
+                "{}\t{}\n",
+                self.x_labels[i],
+                crate::format_double(self.percentages[i])
+            ));
         }
 
         Ok(())

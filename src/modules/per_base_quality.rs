@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use crate::error::Result;
 use crate::graphs::base_group;
 use crate::graphs::quality_count::QualityCount;
@@ -46,7 +48,7 @@ impl PerBaseQualityScores {
             return;
         }
 
-        let (min_char, max_char) = self.calculate_offsets();
+        let (min_char, _) = self.calculate_offsets();
         let encoding = PhredEncoding::from_lowest_char(min_char);
         let offset = encoding.offset();
 
@@ -158,7 +160,8 @@ impl QcModule for PerBaseQualityScores {
         self.means = None; // Invalidate cache
         let qual = seq.quality.as_bytes();
         if self.quality_counts.len() < qual.len() {
-            self.quality_counts.resize_with(qual.len(), QualityCount::new);
+            self.quality_counts
+                .resize_with(qual.len(), QualityCount::new);
         }
         for (i, &c) in qual.iter().enumerate() {
             self.quality_counts[i].add_value(c);
@@ -200,6 +203,30 @@ impl QcModule for PerBaseQualityScores {
         false
     }
 
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            let max_len = self.quality_counts.len().max(other.quality_counts.len());
+            self.quality_counts.resize_with(max_len, QualityCount::new);
+
+            for (i, other_qc) in other.quality_counts.iter().enumerate() {
+                self.quality_counts[i].merge_from(other_qc);
+            }
+
+            // Invalidate all caches
+            self.means = None;
+            self.medians = None;
+            self.lower_quartile = None;
+            self.upper_quartile = None;
+            self.lowest = None;
+            self.highest = None;
+            self.x_labels = None;
+        }
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate(&report.config);
 
@@ -216,14 +243,26 @@ impl QcModule for PerBaseQualityScores {
         let encoding = PhredEncoding::from_lowest_char(min_char);
         let high = {
             let h = max_char as i32 - encoding.offset() as i32;
-            if h < 35 { 35.0 } else { h as f64 }
+            if h < 35 {
+                35.0
+            } else {
+                h as f64
+            }
         };
         let width = 800.max(means.len() * 15);
         let svg = crate::graphs::box_plot::render_quality_box_plot(
-            means, medians, lowest, highest, lq, uq,
-            0.0, high, x_labels,
+            means,
+            medians,
+            lowest,
+            highest,
+            lq,
+            uq,
+            0.0,
+            high,
+            x_labels,
             &format!("Quality scores across all bases ({} encoding)", encoding),
-            width, 600,
+            width,
+            600,
         );
         report.add_image("per_base_quality.png", &svg);
 

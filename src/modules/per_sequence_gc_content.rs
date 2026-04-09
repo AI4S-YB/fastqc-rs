@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use crate::error::Result;
 use crate::modules::gc_model::GcModel;
 use crate::modules::{ModuleConfig, QcModule};
@@ -67,7 +69,8 @@ impl PerSequenceGCContent {
         // Average mode over adjacent positions within 10% of modal count
         let mut mode = 0.0f64;
         let mut mode_duplicates = 0;
-        let threshold = self.gc_distribution[first_mode] - (self.gc_distribution[first_mode] / 10.0);
+        let threshold =
+            self.gc_distribution[first_mode] - (self.gc_distribution[first_mode] / 10.0);
 
         let mut fell_off_top = true;
         for i in first_mode..101 {
@@ -119,7 +122,8 @@ impl PerSequenceGCContent {
             if self.theoretical_distribution[i] > max {
                 max = self.theoretical_distribution[i];
             }
-            self.deviation_percent += (self.theoretical_distribution[i] - self.gc_distribution[i]).abs();
+            self.deviation_percent +=
+                (self.theoretical_distribution[i] - self.gc_distribution[i]).abs();
         }
 
         if total_count > 0.0 {
@@ -193,10 +197,25 @@ impl QcModule for PerSequenceGCContent {
         self.deviation_percent > self.warn_threshold
     }
 
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            for i in 0..101 {
+                self.gc_distribution[i] += other.gc_distribution[i];
+            }
+            self.calculated = false;
+        }
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate();
 
-        let max = self.gc_distribution.iter()
+        let max = self
+            .gc_distribution
+            .iter()
             .chain(self.theoretical_distribution.iter())
             .cloned()
             .fold(0.0f64, f64::max);
@@ -219,7 +238,11 @@ impl QcModule for PerSequenceGCContent {
         let data = &mut report.data;
         data.push_str("#GC Content\tCount\n");
         for i in 0..101 {
-            data.push_str(&format!("{}\t{}\n", i, crate::format_double(self.gc_distribution[i])));
+            data.push_str(&format!(
+                "{}\t{}\n",
+                i,
+                crate::format_double(self.gc_distribution[i])
+            ));
         }
 
         Ok(())

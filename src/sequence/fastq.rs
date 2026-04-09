@@ -2,13 +2,13 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
-use flate2::read::MultiGzDecoder;
 use bzip2::read::BzDecoder;
+use flate2::read::MultiGzDecoder;
 
 use crate::config::Config;
 use crate::error::{FastqcError, Result};
-use crate::sequence::{Sequence, SequenceFile};
 use crate::sequence::colorspace;
+use crate::sequence::{Sequence, SequenceFile};
 
 /// FASTQ file reader supporting plain text, gzip, and bzip2 compression.
 pub struct FastqReader {
@@ -49,13 +49,19 @@ impl FastqReader {
         let file_size = std::fs::metadata(path)?.len();
         let file = File::open(path)?;
 
+        // Use 256KB buffer for I/O (vs default 8KB) - significant for decompression throughput
+        const BUF_SIZE: usize = 256 * 1024;
+
         let path_str = path.to_string_lossy().to_lowercase();
         let reader: Box<dyn BufRead> = if path_str.ends_with(".gz") {
-            Box::new(BufReader::new(MultiGzDecoder::new(file)))
+            Box::new(BufReader::with_capacity(
+                BUF_SIZE,
+                MultiGzDecoder::new(file),
+            ))
         } else if path_str.ends_with(".bz2") {
-            Box::new(BufReader::new(BzDecoder::new(file)))
+            Box::new(BufReader::with_capacity(BUF_SIZE, BzDecoder::new(file)))
         } else {
-            Box::new(BufReader::new(file))
+            Box::new(BufReader::with_capacity(BUF_SIZE, file))
         };
 
         Ok(Self {
@@ -88,7 +94,7 @@ impl FastqReader {
         Ok(Some(line))
     }
 
-    fn read_sequence(&mut self) -> Result<Option<Sequence>> {
+    pub fn read_sequence(&mut self) -> Result<Option<Sequence>> {
         // Skip blank lines to find ID line
         let id_line = loop {
             match self.read_line()? {
@@ -108,14 +114,14 @@ impl FastqReader {
         let id = id_line[1..].to_string();
 
         // Read sequence line
-        let seq_line = self
-            .read_line()?
-            .ok_or_else(|| FastqcError::SequenceFormat("Unexpected end of file reading sequence".into()))?;
+        let seq_line = self.read_line()?.ok_or_else(|| {
+            FastqcError::SequenceFormat("Unexpected end of file reading sequence".into())
+        })?;
 
         // Read separator line (+)
-        let sep_line = self
-            .read_line()?
-            .ok_or_else(|| FastqcError::SequenceFormat("Unexpected end of file reading separator".into()))?;
+        let sep_line = self.read_line()?.ok_or_else(|| {
+            FastqcError::SequenceFormat("Unexpected end of file reading separator".into())
+        })?;
 
         if !sep_line.starts_with('+') {
             return Err(FastqcError::SequenceFormat(format!(
@@ -125,9 +131,9 @@ impl FastqReader {
         }
 
         // Read quality line
-        let qual_line = self
-            .read_line()?
-            .ok_or_else(|| FastqcError::SequenceFormat("Unexpected end of file reading quality".into()))?;
+        let qual_line = self.read_line()?.ok_or_else(|| {
+            FastqcError::SequenceFormat("Unexpected end of file reading quality".into())
+        })?;
 
         if qual_line.len() != seq_line.len() {
             return Err(FastqcError::SequenceFormat(format!(
@@ -139,7 +145,7 @@ impl FastqReader {
         }
 
         // Handle colorspace
-        let mut seq = if !self.colorspace_checked {
+        let seq = if !self.colorspace_checked {
             self.colorspace_checked = true;
             if colorspace::is_colorspace(&seq_line) {
                 self.is_colorspace = true;

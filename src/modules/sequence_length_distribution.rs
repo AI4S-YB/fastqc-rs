@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use crate::error::Result;
 use crate::modules::{ModuleConfig, QcModule};
 use crate::report::ReportArchive;
@@ -83,6 +85,21 @@ impl QcModule for SequenceLengthDistribution {
         min != max
     }
 
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            let max_len = self.length_counts.len().max(other.length_counts.len());
+            self.length_counts.resize(max_len, 0.0);
+
+            for (i, &v) in other.length_counts.iter().enumerate() {
+                self.length_counts[i] += v;
+            }
+        }
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         let min = self.min_length();
         let max = self.max_length();
@@ -147,7 +164,11 @@ impl QcModule for SequenceLengthDistribution {
         let data = &mut report.data;
         data.push_str("#Length\tCount\n");
         for i in 0..display_lengths.len() {
-            data.push_str(&format!("{}\t{}\n", display_lengths[i], crate::format_double(display_counts[i])));
+            data.push_str(&format!(
+                "{}\t{}\n",
+                display_lengths[i],
+                crate::format_double(display_counts[i])
+            ));
         }
 
         Ok(())

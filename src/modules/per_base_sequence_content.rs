@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use crate::error::Result;
 use crate::graphs::base_group;
 use crate::modules::{ModuleConfig, QcModule};
@@ -157,6 +159,35 @@ impl QcModule for PerBaseSequenceContent {
 
     fn raises_warning(&mut self) -> bool {
         self.check_threshold(self.warn_threshold)
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            let max_len = self.g_counts.len().max(other.g_counts.len());
+            self.g_counts.resize(max_len, 0);
+            self.a_counts.resize(max_len, 0);
+            self.t_counts.resize(max_len, 0);
+            self.c_counts.resize(max_len, 0);
+
+            for (i, &v) in other.g_counts.iter().enumerate() {
+                self.g_counts[i] += v;
+            }
+            for (i, &v) in other.a_counts.iter().enumerate() {
+                self.a_counts[i] += v;
+            }
+            for (i, &v) in other.t_counts.iter().enumerate() {
+                self.t_counts[i] += v;
+            }
+            for (i, &v) in other.c_counts.iter().enumerate() {
+                self.c_counts[i] += v;
+            }
+
+            self.calculated = false;
+        }
     }
 
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {

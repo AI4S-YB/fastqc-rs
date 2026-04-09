@@ -1,16 +1,16 @@
+pub mod adapter_content;
 pub mod basic_stats;
+pub mod duplication_level;
+pub mod gc_model;
+pub mod kmer_content;
+pub mod n_content;
+pub mod overrepresented_seqs;
 pub mod per_base_quality;
-pub mod per_tile_quality;
-pub mod per_sequence_quality;
 pub mod per_base_sequence_content;
 pub mod per_sequence_gc_content;
-pub mod n_content;
+pub mod per_sequence_quality;
+pub mod per_tile_quality;
 pub mod sequence_length_distribution;
-pub mod duplication_level;
-pub mod overrepresented_seqs;
-pub mod adapter_content;
-pub mod kmer_content;
-pub mod gc_model;
 
 use crate::config::Config;
 use crate::error::Result;
@@ -18,7 +18,8 @@ use crate::report::ReportArchive;
 use crate::sequence::Sequence;
 
 /// Quality control module trait, equivalent to Java's QCModule interface.
-pub trait QcModule {
+/// Requires Send for multi-threaded data-parallel processing.
+pub trait QcModule: Send {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn process_sequence(&mut self, seq: &Sequence);
@@ -28,6 +29,13 @@ pub trait QcModule {
     fn ignore_filtered_sequences(&self) -> bool;
     fn ignore_in_report(&self) -> bool;
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()>;
+
+    /// Convert self into Any for downcasting during merge.
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send>;
+
+    /// Merge another module's accumulated state into this one.
+    /// The `other` must be the same concrete type (obtained via `into_any`).
+    fn merge(&mut self, other: Box<dyn std::any::Any + Send>);
 }
 
 /// Module threshold configuration, loaded from limits.txt.
@@ -67,8 +75,16 @@ impl ModuleConfig {
 
         // Ignore flags default to 0
         for module in &[
-            "duplication", "kmer", "n_content", "overrepresented", "quality_base",
-            "sequence", "gc_sequence", "quality_sequence", "tile", "sequence_length",
+            "duplication",
+            "kmer",
+            "n_content",
+            "overrepresented",
+            "quality_base",
+            "sequence",
+            "gc_sequence",
+            "quality_sequence",
+            "tile",
+            "sequence_length",
             "adapter",
         ] {
             params.insert(format!("{}:ignore", module), 0.0);
@@ -88,7 +104,10 @@ impl ModuleConfig {
             }
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() != 3 {
-                eprintln!("Config line '{}' didn't contain the 3 required sections", line);
+                eprintln!(
+                    "Config line '{}' didn't contain the 3 required sections",
+                    line
+                );
                 continue;
             }
             if !["warn", "error", "ignore"].contains(&parts[1]) {
@@ -125,16 +144,34 @@ pub fn create_module_list(config: &Config, module_config: &ModuleConfig) -> Vec<
 
     let mut modules: Vec<Box<dyn QcModule>> = Vec::new();
     modules.push(Box::new(basic_stats::BasicStats::new()));
-    modules.push(Box::new(per_base_quality::PerBaseQualityScores::new(module_config)));
-    modules.push(Box::new(per_tile_quality::PerTileQualityScores::new(module_config)));
-    modules.push(Box::new(per_sequence_quality::PerSequenceQualityScores::new(module_config)));
-    modules.push(Box::new(per_base_sequence_content::PerBaseSequenceContent::new(module_config)));
-    modules.push(Box::new(per_sequence_gc_content::PerSequenceGCContent::new(module_config)));
+    modules.push(Box::new(per_base_quality::PerBaseQualityScores::new(
+        module_config,
+    )));
+    modules.push(Box::new(per_tile_quality::PerTileQualityScores::new(
+        module_config,
+    )));
+    modules.push(Box::new(
+        per_sequence_quality::PerSequenceQualityScores::new(module_config),
+    ));
+    modules.push(Box::new(
+        per_base_sequence_content::PerBaseSequenceContent::new(module_config),
+    ));
+    modules.push(Box::new(
+        per_sequence_gc_content::PerSequenceGCContent::new(module_config),
+    ));
     modules.push(Box::new(n_content::NContent::new(module_config)));
-    modules.push(Box::new(sequence_length_distribution::SequenceLengthDistribution::new(module_config)));
+    modules.push(Box::new(
+        sequence_length_distribution::SequenceLengthDistribution::new(module_config),
+    ));
     modules.push(Box::new(dup));
     modules.push(Box::new(overrep));
-    modules.push(Box::new(adapter_content::AdapterContent::new(config, module_config)));
-    modules.push(Box::new(kmer_content::KmerContent::new(config, module_config)));
+    modules.push(Box::new(adapter_content::AdapterContent::new(
+        config,
+        module_config,
+    )));
+    modules.push(Box::new(kmer_content::KmerContent::new(
+        config,
+        module_config,
+    )));
     modules
 }

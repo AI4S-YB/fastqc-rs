@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::any::Any;
 use std::sync::{Arc, Mutex};
+
+use ahash::AHashMap;
 
 use crate::config::Config;
 use crate::error::Result;
@@ -9,8 +11,9 @@ use crate::sequence::contaminant::ContaminantFinder;
 use crate::sequence::Sequence;
 
 /// Shared data between OverRepresentedSeqs and DuplicationLevel.
+/// Uses Arc<Mutex<>> for thread-safety during multi-threaded processing.
 pub struct SharedDuplicationData {
-    pub sequences: HashMap<String, u64>,
+    pub sequences: AHashMap<String, u64>,
     pub count: u64,
     pub count_at_unique_limit: u64,
     pub frozen: bool,
@@ -20,7 +23,7 @@ pub struct SharedDuplicationData {
 impl SharedDuplicationData {
     pub fn new() -> Self {
         Self {
-            sequences: HashMap::new(),
+            sequences: AHashMap::new(),
             count: 0,
             count_at_unique_limit: 0,
             frozen: false,
@@ -169,11 +172,49 @@ impl QcModule for OverRepresentedSeqs {
         !self.overrepresented.is_empty()
     }
 
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn merge(&mut self, other: Box<dyn Any + Send>) {
+        if let Ok(other) = other.downcast::<Self>() {
+            let mut self_data = self.shared.lock().unwrap();
+            let other_data = other.shared.lock().unwrap();
+
+            self_data.count += other_data.count;
+
+            for (seq, &count) in &other_data.sequences {
+                if let Some(existing) = self_data.sequences.get_mut(seq) {
+                    *existing += count;
+                } else if !self_data.frozen {
+                    self_data.sequences.insert(seq.clone(), count);
+                    self_data.unique_sequence_count += 1;
+                    if self_data.unique_sequence_count >= OBSERVATION_CUTOFF {
+                        self_data.frozen = true;
+                    }
+                }
+            }
+
+            if self_data.frozen || other_data.frozen {
+                self_data.frozen = true;
+            }
+            if other_data.count_at_unique_limit > self_data.count_at_unique_limit {
+                self_data.count_at_unique_limit = other_data.count_at_unique_limit;
+            }
+
+            drop(other_data);
+            drop(self_data);
+            self.calculated = false;
+        }
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate_overrepresented();
 
         if self.overrepresented.is_empty() {
-            report.html_body.push_str("<p>No overrepresented sequences</p>");
+            report
+                .html_body
+                .push_str("<p>No overrepresented sequences</p>");
         } else {
             report.html_body.push_str("<table><thead><tr><th>Sequence</th><th>Count</th><th>Percentage</th><th>Possible Source</th></tr></thead><tbody>");
             for seq in &self.overrepresented {
@@ -195,7 +236,10 @@ impl QcModule for OverRepresentedSeqs {
                 let rounded_pct = (seq.percentage * 100.0).round() / 100.0;
                 data.push_str(&format!(
                     "{}\t{}\t{}\t{}\n",
-                    seq.seq, seq.count, crate::format_double(rounded_pct), seq.contaminant_hit
+                    seq.seq,
+                    seq.count,
+                    crate::format_double(rounded_pct),
+                    seq.contaminant_hit
                 ));
             }
         }

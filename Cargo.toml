@@ -11,14 +11,20 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-flate2 = "1"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 bzip2 = "0.4"
 zip = "2"
 base64 = "0.22"
 thiserror = "2"
 rayon = "1"
 statrs = "0.17"
+ahash = "0.8"
 noodles = { version = "0.109", features = ["bam", "sam", "bgzf", "core"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
 
 [dev-dependencies]
 tempfile = "3"
