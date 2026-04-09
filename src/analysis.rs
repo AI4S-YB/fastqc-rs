@@ -27,7 +27,7 @@ pub fn process_file(path: &Path, config: &Config) -> Result<()> {
     let file_name: String;
 
     match format.as_str() {
-        "bam" | "sam" => {
+        "bam" | "sam" | "bam_mapped" | "sam_mapped" => {
             let only_mapped = format == "bam_mapped" || format == "sam_mapped";
             let mut reader = BamReader::new(path, config, only_mapped)?;
             file_name = reader.name().to_string();
