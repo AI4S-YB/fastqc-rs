@@ -3,10 +3,31 @@ use std::process;
 use clap::Parser;
 use rayon::prelude::*;
 
-use fastqc_rs::config::Config;
 use fastqc_rs::analysis;
+use fastqc_rs::config::Config;
+use fastqc_rs::trim_galore::TrimGaloreConfig;
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    match args.get(1).map(String::as_str) {
+        Some("trim-galore") => run_trim_galore(),
+        _ => run_qc(),
+    }
+}
+
+fn run_trim_galore() {
+    let config = TrimGaloreConfig::parse_from(
+        std::iter::once("fastqc-rs trim-galore".to_string()).chain(std::env::args().skip(2)),
+    );
+
+    if let Err(e) = fastqc_rs::trim_galore::run(&config) {
+        eprintln!("Error: {}", e);
+        process::exit(1);
+    }
+}
+
+fn run_qc() {
     let config = Config::parse();
 
     if let Err(e) = config.validate() {

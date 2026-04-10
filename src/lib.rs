@@ -8,6 +8,7 @@ pub mod graphs;
 pub mod stats;
 pub mod report;
 pub mod analysis;
+pub mod trim_galore;
 
 /// Format f64 like Java's Double.toString(): always shows `.0` for integer values,
 /// and uses scientific notation (uppercase E) for |v| < 1e-3 or |v| >= 1e7.
