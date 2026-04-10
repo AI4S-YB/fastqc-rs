@@ -4,6 +4,7 @@ A Rust implementation of [FastQC](https://www.bioinformatics.babraham.ac.uk/proj
 
 ## Features
 
+- **Built-in [Trim Galore](https://github.com/FelixKrueger/TrimGalore/) support** — adapter/quality trimming via `fastqc-rs trim-galore`, a Rust reimplementation wrapping Cutadapt
 - **12 analysis modules** with identical algorithms and pass/warn/fail thresholds:
   1. Basic Statistics
   2. Per Base Sequence Quality
@@ -91,6 +92,46 @@ For each input file `sample.fastq.gz`, produces:
   - `summary.txt` — PASS/WARN/FAIL per module
   - `Icons/` — Status icons
   - `Images/` — SVG graphs
+
+## Trim Galore
+
+A built-in Rust reimplementation of [Trim Galore](https://github.com/FelixKrueger/TrimGalore/) (by Felix Krueger), wrapping [Cutadapt](https://cutadapt.readthedocs.io/) for adapter and quality trimming. Requires Cutadapt to be installed separately.
+
+```bash
+# Single-end with adapter auto-detection
+fastqc-rs trim-galore reads.fq.gz
+
+# Paired-end with custom cutadapt path
+fastqc-rs trim-galore --paired --path-to-cutadapt /opt/bin/cutadapt \
+  R1.fq.gz R2.fq.gz
+
+# Illumina adapter, quality 30, min length 50, 4 cores
+fastqc-rs trim-galore --illumina -q 30 --length 50 -j 4 -o trimmed/ reads.fq.gz
+
+# Hard-trim to first 75bp
+fastqc-rs trim-galore --hardtrim5 75 reads.fq.gz
+
+# See all options
+fastqc-rs trim-galore --help
+```
+
+Key options:
+
+| Option | Description |
+|--------|-------------|
+| `--paired` | Paired-end mode |
+| `-a, --adapter <SEQ>` | Custom adapter sequence |
+| `--illumina / --nextera / --small-rna / --bgiseq` | Adapter presets |
+| `-q, --quality <INT>` | Quality cutoff (default: 20) |
+| `--length <INT>` | Minimum read length (default: 20) |
+| `-j, --cores <N>` | Number of Cutadapt cores |
+| `--path-to-cutadapt <PATH>` | Path to cutadapt executable |
+| `--clip_R1 / --clip_R2 <INT>` | Clip N bp from 5' end |
+| `--three_prime_clip_R1 / --three_prime_clip_R2 <INT>` | Clip N bp from 3' end |
+| `--hardtrim5 / --hardtrim3 <INT>` | Hard-trim to N bp from 5'/3' end |
+| `--rrbs` | RRBS mode (MspI-digested) |
+| `--fastqc` | Run FastQC after trimming |
+| `-o, --output_dir <DIR>` | Output directory |
 
 ## Performance
 
@@ -181,4 +222,5 @@ This project is licensed under the GNU General Public License v3.0
 
 ## Acknowledgements
 
-Based on [FastQC](https://github.com/s-andrews/FastQC) by Simon Andrews at the Babraham Institute.
+- [FastQC](https://github.com/s-andrews/FastQC) by Simon Andrews at the Babraham Institute
+- [Trim Galore](https://github.com/FelixKrueger/TrimGalore/) by Felix Krueger

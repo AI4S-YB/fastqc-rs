@@ -1,6 +1,6 @@
 [package]
 name = "fastqc-rs"
-version = "0.12.1"
+version = "0.13.0"
 edition = "2021"
 description = "A quality control tool for high throughput sequence data"
 license = "GPL-3.0"
