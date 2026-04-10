@@ -10,31 +10,49 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux AMD64
-          - target: x86_64-unknown-linux-gnu
+          # Linux x86_64 - baseline (SSE2, works on any x86_64, static linked)
+          - name: x86_64-linux-baseline
+            target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             archive: tar.gz
+            rustflags: "-C target-cpu=x86-64"
+          # Linux x86_64 - AVX2 (Haswell/Broadwell 2013+, static linked)
+          - name: x86_64-linux-avx2
+            target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+            rustflags: "-C target-cpu=x86-64-v3"
+          # Linux x86_64 - AVX-512 (Skylake-SP/Xeon Scalable 2017+, static linked)
+          - name: x86_64-linux-avx512
+            target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+            rustflags: "-C target-cpu=x86-64-v4"
           # Linux ARM64
-          - target: aarch64-unknown-linux-gnu
+          - name: aarch64-linux
+            target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             archive: tar.gz
             cross: true
           # macOS Intel
-          - target: x86_64-apple-darwin
+          - name: x86_64-macos
+            target: x86_64-apple-darwin
             os: macos-latest
             archive: tar.gz
           # macOS Apple Silicon
-          - target: aarch64-apple-darwin
+          - name: aarch64-macos
+            target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
           # Windows AMD64
-          - target: x86_64-pc-windows-msvc
+          - name: x86_64-windows
+            target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
 
@@ -46,28 +64,34 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install musl tools
+        if: contains(matrix.target, 'musl') && !matrix.cross
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
       - name: Install cross-compilation tools
         if: matrix.cross
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu musl-tools
 
       - name: Build
         shell: bash
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags || '' }}
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-            export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+            cargo install cross --git https://github.com/cross-rs/cross
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
           fi
-          cargo build --release --target ${{ matrix.target }}
 
       - name: Package (unix)
         if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../fastqc-rs-${{ matrix.target }}.tar.gz fastqc-rs
+          tar czf ../../../fastqc-rs-${{ matrix.name }}.tar.gz fastqc-rs
           cd ../../..
 
       - name: Package (windows)
@@ -75,14 +99,14 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../fastqc-rs-${{ matrix.target }}.zip fastqc-rs.exe
+          7z a ../../../fastqc-rs-${{ matrix.name }}.zip fastqc-rs.exe
           cd ../../..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fastqc-rs-${{ matrix.target }}
-          path: fastqc-rs-${{ matrix.target }}.${{ matrix.archive }}
+          name: fastqc-rs-${{ matrix.name }}
+          path: fastqc-rs-${{ matrix.name }}.${{ matrix.archive }}
 
   release:
     name: Create Release
@@ -107,6 +131,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          body: |
+            ## Linux x86_64 Binary Selection Guide
+
+            All Linux binaries are **statically linked** (musl) — no GLIBC dependency, works on any Linux distro.
+
+            | Binary | CPU Requirement | Recommended For |
+            |--------|----------------|-----------------|
+            | `x86_64-linux-baseline` | Any x86_64 | Old servers, VMs, unknown CPU |
+            | `x86_64-linux-avx2` | Haswell/Broadwell+ (2013+) | **Most users** — Xeon E5/E7 v3+, Core 4th gen+ |
+            | `x86_64-linux-avx512` | Skylake-SP+ (2017+) | Xeon Scalable (Gold/Platinum), best performance |
+
+            **How to check your CPU:**
+            ```bash
+            # Check AVX-512 support
+            grep -q avx512f /proc/cpuinfo && echo "Use avx512" || (grep -q avx2 /proc/cpuinfo && echo "Use avx2" || echo "Use baseline")
+            ```
           files: |
             artifacts/fastqc-rs-*
             artifacts/sha256sums.txt
