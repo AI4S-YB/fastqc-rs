@@ -136,6 +136,25 @@ Keeps the 1 reader + 4 worker architecture, but moves duplication tracking back 
 
 > Tested on Linux 6.6 (WSL2). Uses 5 threads total (1 reader + 4 workers). `summary.txt` matches Java FastQC exactly, `Per sequence quality scores` matches exactly, and `Sequence Duplication Levels` now differs only in floating-point tail digits.
 
+### Comprehensive Benchmark (cold cache, Illumina + ONT)
+
+Tested on Intel i9-13900K (8C/16T), Linux 6.6 (WSL2), all runs with cold disk cache (`echo 3 > /proc/sys/vm/drop_caches`).
+
+**Illumina short reads** (~9.9M reads x 150bp per file):
+
+| Test | FastQC v0.12.1 (Java) | fastqc-rs | Speedup |
+|------|----------------------|-----------|---------|
+| Single file (1.15 GB gz) | 52.3s | 24.8s | **2.1x** |
+| Two files `-t 2` (2.35 GB gz) | 50.5s | 14.1s | **3.6x** |
+
+**ONT long reads** (500K reads, variable length 200bp–150kbp, 3.99 GB gz):
+
+| Test | FastQC v0.12.1 (Java) | fastqc-rs | Speedup |
+|------|----------------------|-----------|---------|
+| Single file | 154.7s | 32.9s | **4.7x** |
+
+> **Note on Java memory**: FastQC (Java) defaults to 512 MB heap and will OOM on large ONT datasets. The benchmark used `--memory 5120` (5 GB) for the ONT test. fastqc-rs has no such limitation — memory usage scales automatically.
+
 ## Compatibility
 
 Output format is compatible with Java FastQC v0.12.1:
