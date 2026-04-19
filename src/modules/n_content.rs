@@ -99,13 +99,7 @@ impl QcModule for NContent {
             self.not_n_counts.resize(len, 0);
         }
 
-        for (i, &c) in seq_bytes.iter().enumerate() {
-            if c == b'N' {
-                self.n_counts[i] += 1;
-            } else {
-                self.not_n_counts[i] += 1;
-            }
-        }
+        crate::simd::count_n_per_position(seq_bytes, &mut self.n_counts, &mut self.not_n_counts);
     }
 
     fn reset(&mut self) {

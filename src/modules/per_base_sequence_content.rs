@@ -134,15 +134,13 @@ impl QcModule for PerBaseSequenceContent {
             self.c_counts.resize(len, 0);
         }
 
-        for (i, &c) in seq_bytes.iter().enumerate() {
-            match c {
-                b'G' => self.g_counts[i] += 1,
-                b'A' => self.a_counts[i] += 1,
-                b'T' => self.t_counts[i] += 1,
-                b'C' => self.c_counts[i] += 1,
-                _ => {}
-            }
-        }
+        crate::simd::count_bases_per_position(
+            seq_bytes,
+            &mut self.a_counts,
+            &mut self.c_counts,
+            &mut self.g_counts,
+            &mut self.t_counts,
+        );
     }
 
     fn reset(&mut self) {
