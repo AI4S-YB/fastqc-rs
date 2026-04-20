@@ -19,6 +19,9 @@ thiserror = "2"
 rayon = "1"
 statrs = "0.17"
 ahash = "0.8"
+aho-corasick = "1"
+mimalloc = { version = "0.1", default-features = false }
+memchr = "2"
 pulp = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
 noodles = { version = "0.109", features = ["bam", "sam", "bgzf", "core"] }
