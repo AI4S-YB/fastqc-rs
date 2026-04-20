@@ -200,6 +200,40 @@ impl QcModule for BasicStats {
         }
     }
 
+    fn module_id(&self) -> &str {
+        "basic_statistics"
+    }
+
+    fn json_data(&mut self, _config: &crate::config::Config) -> serde_json::Value {
+        let encoding = PhredEncoding::from_lowest_char(self.lowest_char);
+        let acgt = self.a_count + self.t_count + self.g_count + self.c_count;
+        let gc_percent = if acgt > 0 {
+            (self.g_count + self.c_count) as f64 * 100.0 / acgt as f64
+        } else {
+            0.0
+        };
+        let display = if self.min_length == self.max_length {
+            format!("{}", self.min_length)
+        } else {
+            format!("{}-{}", self.min_length, self.max_length)
+        };
+        serde_json::json!({
+            "file_name": self.name.clone().unwrap_or_else(|| "unknown".to_string()),
+            "file_type": self.file_type.clone().unwrap_or_else(|| "Conventional base calls".to_string()),
+            "encoding": encoding.to_string(),
+            "total_sequences": self.actual_count,
+            "filtered_sequences": self.filtered_count,
+            "total_bases": self.total_bases,
+            "total_bases_human": Self::format_length(self.total_bases),
+            "sequence_length": {
+                "min": self.min_length,
+                "max": self.max_length,
+                "display": display,
+            },
+            "gc_percent": gc_percent,
+        })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         let encoding = PhredEncoding::from_lowest_char(self.lowest_char);
         let gc_percent = if self.a_count + self.t_count + self.g_count + self.c_count > 0 {

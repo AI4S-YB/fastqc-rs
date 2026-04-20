@@ -425,6 +425,57 @@ impl QcModule for KmerContent {
         }
     }
 
+    fn module_id(&self) -> &str {
+        "kmer_content"
+    }
+
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "warn": self.warn_threshold,
+            "error": self.error_threshold,
+        }))
+    }
+
+    fn json_data(&mut self, config: &crate::config::Config) -> serde_json::Value {
+        self.calculate_enrichment(config);
+        let plot_series: Vec<serde_json::Value> = self
+            .enrichments
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let obs_exp: Vec<serde_json::Value> = row
+                    .iter()
+                    .map(|&v| crate::modules::json_num(v))
+                    .collect();
+                serde_json::json!({
+                    "sequence": self.x_labels.get(i).cloned().unwrap_or_default(),
+                    "obs_exp": obs_exp,
+                })
+            })
+            .collect();
+        let records: Vec<serde_json::Value> = self
+            .sorted_kmer_data
+            .iter()
+            .map(|k| {
+                serde_json::json!({
+                    "sequence": k.sequence,
+                    "estimated_count": k.count,
+                    "p_value": crate::modules::json_num(k.p_value as f64),
+                    "obs_exp_max": crate::modules::json_num(k.max_obs_exp as f64),
+                    "max_obs_exp_position": k.max_position,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "kmer_size": self.kmer_size,
+            "sampled_every_n_reads": 50,
+            "estimated_count_multiplier": 50,
+            "position_groups": self.x_categories,
+            "plot_series": plot_series,
+            "records": records,
+        })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate_enrichment(&report.config);
 

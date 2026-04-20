@@ -1,6 +1,7 @@
 pub mod html;
-pub mod text_report;
+pub mod json_report;
 pub mod summary;
+pub mod text_report;
 
 use crate::config::Config;
 

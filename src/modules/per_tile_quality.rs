@@ -292,6 +292,41 @@ impl QcModule for PerTileQualityScores {
         }
     }
 
+    fn module_id(&self) -> &str {
+        "per_tile_sequence_quality"
+    }
+
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "warn": self.warn_threshold,
+            "error": self.error_threshold,
+        }))
+    }
+
+    fn json_data(&mut self, config: &crate::config::Config) -> serde_json::Value {
+        self.calculate(config);
+        let tiles: Vec<serde_json::Value> = self
+            .tiles
+            .iter()
+            .enumerate()
+            .map(|(idx, &tile)| {
+                let md: Vec<serde_json::Value> = self.means[idx]
+                    .iter()
+                    .map(|&v| crate::modules::json_num(v))
+                    .collect();
+                serde_json::json!({
+                    "tile": tile,
+                    "mean_deviation": md,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "max_deviation": crate::modules::json_num(self.max_deviation),
+            "position_groups": self.x_labels,
+            "tiles": tiles,
+        })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate(&report.config);
 

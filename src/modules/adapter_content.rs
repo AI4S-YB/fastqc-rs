@@ -254,6 +254,54 @@ impl QcModule for AdapterContent {
         }
     }
 
+    fn module_id(&self) -> &str {
+        "adapter_content"
+    }
+
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "warn": self.warn_threshold,
+            "error": self.error_threshold,
+        }))
+    }
+
+    fn json_data(&mut self, config: &crate::config::Config) -> serde_json::Value {
+        let too_short = self.longest_adapter > self.longest_sequence;
+        let series: Vec<serde_json::Value>;
+        let position_groups: Vec<String>;
+        if too_short {
+            series = Vec::new();
+            position_groups = Vec::new();
+        } else {
+            self.calculate_enrichment(config);
+            position_groups = self.x_labels.clone();
+            series = self
+                .adapters
+                .iter()
+                .enumerate()
+                .map(|(i, adapter)| {
+                    let values: Vec<serde_json::Value> = self.enrichments[i]
+                        .iter()
+                        .map(|&v| crate::modules::json_num(v))
+                        .collect();
+                    serde_json::json!({
+                        "adapter_name": self.labels.get(i).cloned().unwrap_or_default(),
+                        "adapter_sequence": adapter.sequence.clone(),
+                        "values": values,
+                    })
+                })
+                .collect();
+        }
+        serde_json::json!({
+            "total_sequences_considered": self.total_count,
+            "max_read_length": self.longest_sequence,
+            "max_adapter_length": self.longest_adapter,
+            "read_length_too_short": too_short,
+            "position_groups": position_groups,
+            "series": series,
+        })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         if self.longest_adapter > self.longest_sequence {
             report.html_body.push_str(&format!(

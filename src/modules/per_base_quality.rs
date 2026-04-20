@@ -3,7 +3,7 @@ use std::any::Any;
 use crate::error::Result;
 use crate::graphs::base_group;
 use crate::graphs::quality_count::QualityCount;
-use crate::modules::{ModuleConfig, QcModule};
+use crate::modules::{json_num, ModuleConfig, QcModule};
 use crate::report::ReportArchive;
 use crate::sequence::phred::PhredEncoding;
 use crate::sequence::Sequence;
@@ -225,6 +225,48 @@ impl QcModule for PerBaseQualityScores {
             self.highest = None;
             self.x_labels = None;
         }
+    }
+
+    fn module_id(&self) -> &str {
+        "per_base_sequence_quality"
+    }
+
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "warn_lower": self.warn_lower,
+            "warn_median": self.warn_median,
+            "error_lower": self.error_lower,
+            "error_median": self.error_median,
+        }))
+    }
+
+    fn json_data(&mut self, config: &crate::config::Config) -> serde_json::Value {
+        self.calculate(config);
+        let (min_char, _) = self.calculate_offsets();
+        let encoding = PhredEncoding::from_lowest_char(min_char);
+        let labels = self.x_labels.as_ref().cloned().unwrap_or_default();
+        let means = self.means.clone().unwrap_or_default();
+        let medians = self.medians.clone().unwrap_or_default();
+        let lq = self.lower_quartile.clone().unwrap_or_default();
+        let uq = self.upper_quartile.clone().unwrap_or_default();
+        let lowest = self.lowest.clone().unwrap_or_default();
+        let highest = self.highest.clone().unwrap_or_default();
+        let mut groups = Vec::with_capacity(labels.len());
+        for i in 0..labels.len() {
+            groups.push(serde_json::json!({
+                "label": labels[i],
+                "mean": json_num(*means.get(i).unwrap_or(&0.0)),
+                "median": json_num(*medians.get(i).unwrap_or(&0.0)),
+                "lower_quartile": json_num(*lq.get(i).unwrap_or(&0.0)),
+                "upper_quartile": json_num(*uq.get(i).unwrap_or(&0.0)),
+                "percentile_10": json_num(*lowest.get(i).unwrap_or(&0.0)),
+                "percentile_90": json_num(*highest.get(i).unwrap_or(&0.0)),
+            }));
+        }
+        serde_json::json!({
+            "encoding": encoding.to_string(),
+            "position_groups": groups,
+        })
     }
 
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {

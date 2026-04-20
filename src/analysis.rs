@@ -10,7 +10,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::modules::{self, ModuleConfig, QcModule};
 use crate::report::ReportArchive;
-use crate::report::{html, summary, text_report};
+use crate::report::{html, json_report, summary, text_report};
 use crate::sequence::bam::BamReader;
 use crate::sequence::fastq::FastqReader;
 use crate::sequence::Sequence;
@@ -48,7 +48,7 @@ pub fn process_file(path: &Path, config: &Config) -> Result<()> {
     }
 
     // Generate reports
-    generate_reports(path, &file_name, &mut modules, config)?;
+    generate_reports(path, &file_name, &format, &mut modules, config)?;
 
     Ok(())
 }
@@ -294,6 +294,7 @@ fn report_progress(config: &Config, name: &str, count: u64, percent: u8, last: &
 fn generate_reports(
     path: &Path,
     file_name: &str,
+    detected_format: &str,
     modules: &mut Vec<Box<dyn QcModule>>,
     config: &Config,
 ) -> Result<()> {
@@ -301,6 +302,7 @@ fn generate_reports(
     let output_base = get_output_base(path, file_name, config);
     let html_path = PathBuf::from(format!("{}_fastqc.html", output_base));
     let zip_path = PathBuf::from(format!("{}_fastqc.zip", output_base));
+    let json_path = PathBuf::from(format!("{}_fastqc.json", output_base));
     let folder_name = format!(
         "{}_fastqc",
         PathBuf::from(&output_base)
@@ -405,6 +407,16 @@ fn generate_reports(
 
     if !config.quiet {
         eprintln!("Report written: {}", html_path.display());
+    }
+
+    if config.json {
+        let report = json_report::build_report(path, file_name, detected_format, modules, config);
+        let mut json_file = File::create(&json_path)?;
+        let pretty = serde_json::to_string_pretty(&report)?;
+        json_file.write_all(pretty.as_bytes())?;
+        if !config.quiet {
+            eprintln!("JSON report written: {}", json_path.display());
+        }
     }
 
     Ok(())

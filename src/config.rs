@@ -92,6 +92,10 @@ pub struct Config {
     #[arg(long)]
     pub svg: bool,
 
+    /// Also emit a structured JSON report (<base>_fastqc.json) alongside the HTML/zip output
+    #[arg(long)]
+    pub json: bool,
+
     /// Selects a directory to be used for temporary files
     #[arg(short = 'd', long = "dir")]
     pub temp_dir: Option<PathBuf>,
@@ -122,6 +126,7 @@ impl Config {
             min_length: 0,
             dup_length: 0,
             svg: false,
+            json: false,
             temp_dir: None,
         }
     }

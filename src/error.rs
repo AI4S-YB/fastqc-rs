@@ -16,6 +16,9 @@ pub enum FastqcError {
 
     #[error("ZIP error: {0}")]
     Zip(#[from] zip::result::ZipError),
+
+    #[error("JSON serialization error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, FastqcError>;

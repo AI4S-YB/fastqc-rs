@@ -1,4 +1,4 @@
-pub const VERSION: &str = "0.12.1";
+pub const VERSION: &str = "0.14.0";
 
 pub mod config;
 pub mod error;
