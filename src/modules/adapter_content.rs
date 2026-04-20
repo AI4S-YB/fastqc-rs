@@ -1,5 +1,7 @@
 use std::any::Any;
 
+use aho_corasick::AhoCorasick;
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::graphs::base_group;
@@ -51,6 +53,8 @@ pub struct AdapterContent {
     ignore: bool,
     warn_threshold: f64,
     error_threshold: f64,
+    /// Aho-Corasick automaton for multi-pattern search in a single pass.
+    ac: AhoCorasick,
 }
 
 impl AdapterContent {
@@ -94,6 +98,9 @@ impl AdapterContent {
             adapters.push(Adapter::new(name, seq));
         }
 
+        let patterns: Vec<&str> = adapters.iter().map(|a| a.sequence.as_str()).collect();
+        let ac = AhoCorasick::new(&patterns).expect("Failed to build Aho-Corasick automaton");
+
         Self {
             adapters,
             labels,
@@ -106,6 +113,7 @@ impl AdapterContent {
             ignore: module_config.get_param("adapter", "ignore") > 0.0,
             warn_threshold: module_config.get_param("adapter", "warn"),
             error_threshold: module_config.get_param("adapter", "error"),
+            ac,
         }
     }
 
@@ -178,16 +186,37 @@ impl QcModule for AdapterContent {
             }
         }
 
-        for adapter in &mut self.adapters {
-            if let Some(index) = seq.sequence.find(&adapter.sequence) {
-                let max_pos = if self.longest_sequence > self.longest_adapter {
-                    self.longest_sequence - self.longest_adapter
-                } else {
-                    0
-                };
+        // Single-pass Aho-Corasick search finds all adapter matches at once.
+        // For each match we only care about the first (leftmost) occurrence
+        // of each adapter, so we track which adapters have already been seen.
+        let n_adapters = self.adapters.len();
+        let mut seen = 0u64; // bitmask, supports up to 64 adapters
+        let max_pos = if self.longest_sequence > self.longest_adapter {
+            self.longest_sequence - self.longest_adapter
+        } else {
+            0
+        };
+
+        for mat in self.ac.find_overlapping_iter(&seq.sequence) {
+            let adapter_idx = mat.pattern().as_usize();
+            let bit = 1u64 << adapter_idx;
+            if seen & bit != 0 {
+                continue; // only first match per adapter matters
+            }
+            seen |= bit;
+            if seen.count_ones() as usize == n_adapters {
+                // All adapters found, process this one and break
+                let index = mat.start();
+                let adapter = &mut self.adapters[adapter_idx];
                 for i in index..=max_pos.min(adapter.positions.len() - 1) {
                     adapter.increment_count(i);
                 }
+                break;
+            }
+            let index = mat.start();
+            let adapter = &mut self.adapters[adapter_idx];
+            for i in index..=max_pos.min(adapter.positions.len() - 1) {
+                adapter.increment_count(i);
             }
         }
     }
