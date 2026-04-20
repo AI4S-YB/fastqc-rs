@@ -354,3 +354,179 @@ mod tests {
         assert_eq!(min, expected_min);
     }
 }
+
+/// SIMD-accelerated per-position base accumulation using u8 accumulators.
+///
+/// Instead of branching per byte, uses 4× SIMD cmpeq to produce 0xFF masks,
+/// then subtracts from u8 accumulators (0 - 0xFF wraps to +1).
+/// Caller must flush accumulators to u64 counts every ≤255 calls.
+#[inline]
+pub fn accumulate_bases_simd(
+    seq: &[u8],
+    a_acc: &mut [u8],
+    c_acc: &mut [u8],
+    g_acc: &mut [u8],
+    t_acc: &mut [u8],
+) {
+    debug_assert!(a_acc.len() >= seq.len());
+    debug_assert!(c_acc.len() >= seq.len());
+    debug_assert!(g_acc.len() >= seq.len());
+    debug_assert!(t_acc.len() >= seq.len());
+
+    struct AccOp<'a> {
+        seq: &'a [u8],
+        a_acc: &'a mut [u8],
+        c_acc: &'a mut [u8],
+        g_acc: &'a mut [u8],
+        t_acc: &'a mut [u8],
+    }
+
+    impl pulp::WithSimd for AccOp<'_> {
+        type Output = ();
+
+        #[inline(always)]
+        fn with_simd<S: pulp::Simd>(self, simd: S) -> Self::Output {
+            let len = self.seq.len();
+
+            let splat_a = simd.splat_u8s(b'A');
+            let splat_c = simd.splat_u8s(b'C');
+            let splat_g = simd.splat_u8s(b'G');
+            let splat_t = simd.splat_u8s(b'T');
+
+            let (seq_head, seq_tail) = S::as_simd_u8s(self.seq);
+            let (a_head, a_tail) = S::as_mut_simd_u8s(&mut self.a_acc[..len]);
+            let (c_head, c_tail) = S::as_mut_simd_u8s(&mut self.c_acc[..len]);
+            let (g_head, g_tail) = S::as_mut_simd_u8s(&mut self.g_acc[..len]);
+            let (t_head, t_tail) = S::as_mut_simd_u8s(&mut self.t_acc[..len]);
+
+            // SIMD main loop: process full SIMD-width chunks
+            for i in 0..seq_head.len() {
+                let chunk = seq_head[i];
+
+                // cmpeq → 0xFF where match, 0x00 elsewhere
+                let ma = simd.transmute_u8s_m8s(simd.equal_u8s(chunk, splat_a));
+                let mc = simd.transmute_u8s_m8s(simd.equal_u8s(chunk, splat_c));
+                let mg = simd.transmute_u8s_m8s(simd.equal_u8s(chunk, splat_g));
+                let mt = simd.transmute_u8s_m8s(simd.equal_u8s(chunk, splat_t));
+
+                // sub: acc - 0xFF = acc + 1 (wrapping)
+                a_head[i] = simd.sub_u8s(a_head[i], ma);
+                c_head[i] = simd.sub_u8s(c_head[i], mc);
+                g_head[i] = simd.sub_u8s(g_head[i], mg);
+                t_head[i] = simd.sub_u8s(t_head[i], mt);
+            }
+
+            // Scalar tail
+            for j in 0..seq_tail.len() {
+                if seq_tail[j] == b'A' { a_tail[j] = a_tail[j].wrapping_add(1); }
+                if seq_tail[j] == b'C' { c_tail[j] = c_tail[j].wrapping_add(1); }
+                if seq_tail[j] == b'G' { g_tail[j] = g_tail[j].wrapping_add(1); }
+                if seq_tail[j] == b'T' { t_tail[j] = t_tail[j].wrapping_add(1); }
+            }
+        }
+    }
+
+    Arch::new().dispatch(AccOp {
+        seq,
+        a_acc,
+        c_acc,
+        g_acc,
+        t_acc,
+    });
+}
+
+/// Flush u8 accumulators into u64 count arrays and reset accumulators to zero.
+#[inline]
+pub fn flush_base_accumulators(
+    a_acc: &mut [u8],
+    c_acc: &mut [u8],
+    g_acc: &mut [u8],
+    t_acc: &mut [u8],
+    a_counts: &mut [u64],
+    c_counts: &mut [u64],
+    g_counts: &mut [u64],
+    t_counts: &mut [u64],
+    len: usize,
+) {
+    for i in 0..len {
+        a_counts[i] += a_acc[i] as u64;
+        c_counts[i] += c_acc[i] as u64;
+        g_counts[i] += g_acc[i] as u64;
+        t_counts[i] += t_acc[i] as u64;
+        a_acc[i] = 0;
+        c_acc[i] = 0;
+        g_acc[i] = 0;
+        t_acc[i] = 0;
+    }
+}
+
+/// SIMD-accelerated per-position N/not-N accumulation using u8 accumulators.
+#[inline]
+pub fn accumulate_n_simd(
+    seq: &[u8],
+    n_acc: &mut [u8],
+    not_n_acc: &mut [u8],
+) {
+    debug_assert!(n_acc.len() >= seq.len());
+    debug_assert!(not_n_acc.len() >= seq.len());
+
+    struct NOp<'a> {
+        seq: &'a [u8],
+        n_acc: &'a mut [u8],
+        not_n_acc: &'a mut [u8],
+    }
+
+    impl pulp::WithSimd for NOp<'_> {
+        type Output = ();
+
+        #[inline(always)]
+        fn with_simd<S: pulp::Simd>(self, simd: S) -> Self::Output {
+            let len = self.seq.len();
+            let splat_n = simd.splat_u8s(b'N');
+
+            let (seq_head, seq_tail) = S::as_simd_u8s(self.seq);
+            let (n_head, n_tail) = S::as_mut_simd_u8s(&mut self.n_acc[..len]);
+            let (nn_head, nn_tail) = S::as_mut_simd_u8s(&mut self.not_n_acc[..len]);
+
+            let all_ones = simd.splat_u8s(0xFF);
+            for i in 0..seq_head.len() {
+                let chunk = seq_head[i];
+                // cmpeq → 0xFF where N, 0x00 elsewhere
+                let is_n_u8 = simd.transmute_u8s_m8s(simd.equal_u8s(chunk, splat_n));
+                // NOT via XOR with all 1s
+                let not_n_u8 = simd.xor_u8s(is_n_u8, all_ones);
+
+                // acc - 0xFF wraps to acc + 1
+                n_head[i] = simd.sub_u8s(n_head[i], is_n_u8);
+                nn_head[i] = simd.sub_u8s(nn_head[i], not_n_u8);
+            }
+
+            for j in 0..seq_tail.len() {
+                if seq_tail[j] == b'N' {
+                    n_tail[j] = n_tail[j].wrapping_add(1);
+                } else {
+                    nn_tail[j] = nn_tail[j].wrapping_add(1);
+                }
+            }
+        }
+    }
+
+    Arch::new().dispatch(NOp { seq, n_acc, not_n_acc });
+}
+
+/// Flush N/not-N u8 accumulators into u64 counts.
+#[inline]
+pub fn flush_n_accumulators(
+    n_acc: &mut [u8],
+    not_n_acc: &mut [u8],
+    n_counts: &mut [u64],
+    not_n_counts: &mut [u64],
+    len: usize,
+) {
+    for i in 0..len {
+        n_counts[i] += n_acc[i] as u64;
+        not_n_counts[i] += not_n_acc[i] as u64;
+        n_acc[i] = 0;
+        not_n_acc[i] = 0;
+    }
+}

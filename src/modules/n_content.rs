@@ -6,9 +6,16 @@ use crate::modules::{ModuleConfig, QcModule};
 use crate::report::ReportArchive;
 use crate::sequence::Sequence;
 
+const N_FLUSH_INTERVAL: u8 = 255;
+
 pub struct NContent {
     n_counts: Vec<u64>,
     not_n_counts: Vec<u64>,
+    // u8 SIMD accumulators
+    n_acc: Vec<u8>,
+    not_n_acc: Vec<u8>,
+    acc_len: usize,
+    batch_count: u8,
     calculated: bool,
     percentages: Vec<f64>,
     x_labels: Vec<String>,
@@ -22,6 +29,10 @@ impl NContent {
         Self {
             n_counts: Vec::new(),
             not_n_counts: Vec::new(),
+            n_acc: Vec::new(),
+            not_n_acc: Vec::new(),
+            acc_len: 0,
+            batch_count: 0,
             calculated: false,
             percentages: Vec::new(),
             x_labels: Vec::new(),
@@ -31,10 +42,26 @@ impl NContent {
         }
     }
 
+    fn flush_n_acc(&mut self) {
+        if self.batch_count == 0 {
+            return;
+        }
+        crate::simd::flush_n_accumulators(
+            &mut self.n_acc,
+            &mut self.not_n_acc,
+            &mut self.n_counts,
+            &mut self.not_n_counts,
+            self.acc_len,
+        );
+        self.batch_count = 0;
+        self.acc_len = 0;
+    }
+
     fn calculate(&mut self, config: &crate::config::Config) {
         if self.calculated {
             return;
         }
+        self.flush_n_acc();
 
         let groups = base_group::make_base_groups(self.n_counts.len(), config);
         let mut percentages = Vec::with_capacity(groups.len());
@@ -98,13 +125,29 @@ impl QcModule for NContent {
             self.n_counts.resize(len, 0);
             self.not_n_counts.resize(len, 0);
         }
+        if self.n_acc.len() < len {
+            self.n_acc.resize(len, 0);
+            self.not_n_acc.resize(len, 0);
+        }
+        if len > self.acc_len {
+            self.acc_len = len;
+        }
+        if self.batch_count == N_FLUSH_INTERVAL {
+            self.flush_n_acc();
+        }
 
-        crate::simd::count_n_per_position(seq_bytes, &mut self.n_counts, &mut self.not_n_counts);
+        crate::simd::accumulate_n_simd(seq_bytes, &mut self.n_acc, &mut self.not_n_acc);
+        self.batch_count += 1;
     }
 
     fn reset(&mut self) {
+        self.flush_n_acc();
         self.n_counts.clear();
         self.not_n_counts.clear();
+        self.n_acc.clear();
+        self.not_n_acc.clear();
+        self.acc_len = 0;
+        self.batch_count = 0;
         self.calculated = false;
     }
 
@@ -121,7 +164,9 @@ impl QcModule for NContent {
     }
 
     fn merge(&mut self, other: Box<dyn Any + Send>) {
-        if let Ok(other) = other.downcast::<Self>() {
+        if let Ok(mut other) = other.downcast::<Self>() {
+            other.flush_n_acc();
+            self.flush_n_acc();
             let max_len = self.n_counts.len().max(other.n_counts.len());
             self.n_counts.resize(max_len, 0);
             self.not_n_counts.resize(max_len, 0);
