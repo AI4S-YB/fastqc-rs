@@ -198,21 +198,25 @@ fn sum_and_min_quality_simd<S: pulp::Simd>(simd: S, qual: &[u8]) -> (u64, u8) {
 }
 
 /// Count N bases per position, adding to pre-allocated `n_counts` and `not_n_counts`.
+///
+/// Branchless: increment both arrays using arithmetic on the comparison result.
 #[inline]
 pub fn count_n_per_position(seq: &[u8], n_counts: &mut [u64], not_n_counts: &mut [u64]) {
     debug_assert!(n_counts.len() >= seq.len());
     debug_assert!(not_n_counts.len() >= seq.len());
 
     for (i, &b) in seq.iter().enumerate() {
-        if b == b'N' {
-            n_counts[i] += 1;
-        } else {
-            not_n_counts[i] += 1;
-        }
+        let is_n = (b == b'N') as u64;
+        n_counts[i] += is_n;
+        not_n_counts[i] += 1 - is_n;
     }
 }
 
 /// Count A, C, G, T per position into pre-allocated vectors.
+///
+/// Uses a 256-entry LUT to convert base → index (0..4) without branching.
+/// Index 4 = "other" (skipped).  This eliminates costly branch mispredictions
+/// in the inner loop.
 #[inline]
 pub fn count_bases_per_position(
     seq: &[u8],
@@ -226,13 +230,40 @@ pub fn count_bases_per_position(
     debug_assert!(g_counts.len() >= seq.len());
     debug_assert!(t_counts.len() >= seq.len());
 
-    for (i, &b) in seq.iter().enumerate() {
-        match b {
-            b'A' => a_counts[i] += 1,
-            b'C' => c_counts[i] += 1,
-            b'G' => g_counts[i] += 1,
-            b'T' => t_counts[i] += 1,
-            _ => {}
+    // LUT: A=0, C=1, G=2, T=3, everything else=4
+    const LUT: [u8; 256] = {
+        let mut t = [4u8; 256];
+        t[b'A' as usize] = 0;
+        t[b'C' as usize] = 1;
+        t[b'G' as usize] = 2;
+        t[b'T' as usize] = 3;
+        t
+    };
+
+    // Array of 4 mutable slice pointers for indexed access
+    let counts: [&mut [u64]; 4] = [a_counts, c_counts, g_counts, t_counts];
+
+    // Unrolled: process 4 bases at a time to amortize loop overhead
+    let chunks = seq.len() / 4;
+    let remainder = seq.len() % 4;
+
+    for c in 0..chunks {
+        let i = c * 4;
+        let b0 = LUT[seq[i] as usize];
+        let b1 = LUT[seq[i + 1] as usize];
+        let b2 = LUT[seq[i + 2] as usize];
+        let b3 = LUT[seq[i + 3] as usize];
+
+        // Branchless: LUT value < 4 means valid base
+        if b0 < 4 { counts[b0 as usize][i] += 1; }
+        if b1 < 4 { counts[b1 as usize][i + 1] += 1; }
+        if b2 < 4 { counts[b2 as usize][i + 2] += 1; }
+        if b3 < 4 { counts[b3 as usize][i + 3] += 1; }
+    }
+    for i in (chunks * 4)..seq.len() {
+        let idx = LUT[seq[i] as usize];
+        if idx < 4 {
+            counts[idx as usize][i] += 1;
         }
     }
 }
