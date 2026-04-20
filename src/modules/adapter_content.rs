@@ -189,8 +189,11 @@ impl QcModule for AdapterContent {
         // Single-pass Aho-Corasick search finds all adapter matches at once.
         // For each match we only care about the first (leftmost) occurrence
         // of each adapter, so we track which adapters have already been seen.
+        // A `Vec<bool>` (instead of a 64-bit mask) keeps us correct when a
+        // user-supplied `--adapter-file` exceeds 64 entries.
         let n_adapters = self.adapters.len();
-        let mut seen = 0u64; // bitmask, supports up to 64 adapters
+        let mut seen = vec![false; n_adapters];
+        let mut seen_count: usize = 0;
         let max_pos = if self.longest_sequence > self.longest_adapter {
             self.longest_sequence - self.longest_adapter
         } else {
@@ -199,24 +202,18 @@ impl QcModule for AdapterContent {
 
         for mat in self.ac.find_overlapping_iter(&seq.sequence) {
             let adapter_idx = mat.pattern().as_usize();
-            let bit = 1u64 << adapter_idx;
-            if seen & bit != 0 {
+            if seen[adapter_idx] {
                 continue; // only first match per adapter matters
             }
-            seen |= bit;
-            if seen.count_ones() as usize == n_adapters {
-                // All adapters found, process this one and break
-                let index = mat.start();
-                let adapter = &mut self.adapters[adapter_idx];
-                for i in index..=max_pos.min(adapter.positions.len() - 1) {
-                    adapter.increment_count(i);
-                }
-                break;
-            }
+            seen[adapter_idx] = true;
+            seen_count += 1;
             let index = mat.start();
             let adapter = &mut self.adapters[adapter_idx];
             for i in index..=max_pos.min(adapter.positions.len() - 1) {
                 adapter.increment_count(i);
+            }
+            if seen_count == n_adapters {
+                break;
             }
         }
     }

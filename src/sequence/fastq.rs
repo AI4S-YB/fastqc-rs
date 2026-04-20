@@ -235,7 +235,12 @@ impl FastqReader {
             )));
         }
 
-        let id = unsafe { String::from_utf8_unchecked(id_bytes[1..].to_vec()) };
+        let id = String::from_utf8(id_bytes[1..].to_vec()).map_err(|e| {
+            FastqcError::SequenceFormat(format!(
+                "Line {}: sequence ID contains invalid UTF-8: {}",
+                self.line_number, e
+            ))
+        })?;
 
         // --- Line 2: Sequence ---
         let seq_bytes = self.next_line_owned()?.ok_or_else(|| {
@@ -259,7 +264,27 @@ impl FastqReader {
             )));
         }
 
-        // FASTQ data is ASCII — from_utf8_unchecked is safe.
+        // FASTQ spec requires ASCII for sequence and quality lines, but we must
+        // not assume that on untrusted input: corrupted files or files written
+        // with legacy non-UTF-8 encodings would trigger undefined behaviour if
+        // wrapped with `from_utf8_unchecked`. Validate ASCII (cheap, tighter
+        // than UTF-8) and only then perform the unchecked conversion.
+        if !seq_bytes.is_ascii() {
+            return Err(FastqcError::SequenceFormat(format!(
+                "Line {}: sequence line contains non-ASCII bytes",
+                self.line_number.saturating_sub(2)
+            )));
+        }
+        if !qual_bytes.is_ascii() {
+            return Err(FastqcError::SequenceFormat(format!(
+                "Line {}: quality line contains non-ASCII bytes",
+                self.line_number
+            )));
+        }
+
+        // SAFETY: both byte slices are pure ASCII (checked above), therefore
+        // they are also valid UTF-8. Avoiding `String::from_utf8` here saves
+        // the redundant re-validation on the hot path.
         let seq_line = unsafe { String::from_utf8_unchecked(seq_bytes) };
         let qual_line = unsafe { String::from_utf8_unchecked(qual_bytes) };
 
