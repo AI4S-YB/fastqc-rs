@@ -8,6 +8,19 @@ package:
 
 source:
   path: ..
+  # Exclude directories that aren't needed at build time and can blow up
+  # path lengths or recurse into rattler-build's own output dir.
+  filter:
+    exclude:
+      - .git/**
+      - .github/**
+      - output/**
+      - target/**
+      - docs/**
+      - fastqc/**
+      - real-data/**
+      - benchmark_output/**
+      - .claude/**
 
 build:
   number: 0
