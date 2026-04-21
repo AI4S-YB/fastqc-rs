@@ -426,12 +426,12 @@ fn get_output_base(path: &Path, file_name: &str, config: &Config) -> String {
     }
 
     if let Some(ref dir) = config.output_dir {
-        format!("{}/{}", dir.display(), base)
+        dir.join(&base).to_string_lossy().into_owned()
     } else if let Some(parent) = path.parent() {
         if parent.to_string_lossy().is_empty() {
             base
         } else {
-            format!("{}/{}", parent.display(), base)
+            parent.join(&base).to_string_lossy().into_owned()
         }
     } else {
         base
