@@ -177,6 +177,39 @@ impl QcModule for DuplicationLevel {
         // No-op: DuplicationLevel reads from shared OverRepresentedSeqs data at report time.
     }
 
+    fn module_id(&self) -> &str {
+        "sequence_duplication_levels"
+    }
+
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "warn": self.warn_threshold,
+            "error": self.error_threshold,
+        }))
+    }
+
+    fn json_data(&mut self, _config: &crate::config::Config) -> serde_json::Value {
+        self.calculate_levels();
+        let percentages = self.total_percentages.unwrap_or([0.0; 16]);
+        let distribution: Vec<serde_json::Value> = (0..16)
+            .map(|i| {
+                let label = if i == 15 {
+                    format!("{}+", self.labels[i])
+                } else {
+                    self.labels[i].to_string()
+                };
+                serde_json::json!({
+                    "label": label,
+                    "percentage_of_total": crate::modules::json_num(percentages[i]),
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "deduplicated_percentage": crate::modules::json_num(self.percent_different_seqs),
+            "distribution": distribution,
+        })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate_levels();
         let percentages = self.total_percentages.as_ref().unwrap();

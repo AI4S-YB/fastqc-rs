@@ -182,6 +182,30 @@ impl QcModule for NContent {
         }
     }
 
+    fn module_id(&self) -> &str {
+        "per_base_n_content"
+    }
+
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "warn": self.warn_threshold,
+            "error": self.error_threshold,
+        }))
+    }
+
+    fn json_data(&mut self, config: &crate::config::Config) -> serde_json::Value {
+        self.calculate(config);
+        let groups: Vec<serde_json::Value> = (0..self.x_labels.len())
+            .map(|i| {
+                serde_json::json!({
+                    "label": self.x_labels[i],
+                    "n_pct": crate::modules::json_num(self.percentages[i]),
+                })
+            })
+            .collect();
+        serde_json::json!({ "position_groups": groups })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate(&report.config);
 

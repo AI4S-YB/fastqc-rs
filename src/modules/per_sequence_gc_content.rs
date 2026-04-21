@@ -210,6 +210,34 @@ impl QcModule for PerSequenceGCContent {
         }
     }
 
+    fn module_id(&self) -> &str {
+        "per_sequence_gc_content"
+    }
+
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "warn": self.warn_threshold,
+            "error": self.error_threshold,
+        }))
+    }
+
+    fn json_data(&mut self, _config: &crate::config::Config) -> serde_json::Value {
+        self.calculate();
+        let distribution: Vec<serde_json::Value> = (0..101)
+            .map(|i| {
+                serde_json::json!({
+                    "gc_percent": i,
+                    "observed_count": crate::modules::json_num(self.gc_distribution[i]),
+                    "theoretical_count": crate::modules::json_num(self.theoretical_distribution[i]),
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "deviation_percent": crate::modules::json_num(self.deviation_percent),
+            "distribution": distribution,
+        })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate();
 

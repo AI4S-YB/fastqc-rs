@@ -100,6 +100,65 @@ impl QcModule for SequenceLengthDistribution {
         }
     }
 
+    fn module_id(&self) -> &str {
+        "sequence_length_distribution"
+    }
+
+    fn json_data(&mut self, _config: &crate::config::Config) -> serde_json::Value {
+        let min = self.min_length();
+        let max = self.max_length();
+        let range = max.saturating_sub(min) + 1;
+        let interval = if range > 75 {
+            let base_values = [2usize, 5, 10];
+            let mut interval = 1usize;
+            for multiplier in [1, 10, 100, 1000] {
+                for &base in &base_values {
+                    if range / (base * multiplier) <= 50 {
+                        interval = base * multiplier;
+                        break;
+                    }
+                }
+                if range / interval <= 50 {
+                    break;
+                }
+            }
+            interval
+        } else {
+            1
+        };
+
+        let mut distribution: Vec<serde_json::Value> = Vec::new();
+        if !self.length_counts.is_empty() {
+            let mut pos = min;
+            while pos <= max {
+                let end = (pos + interval - 1).min(max);
+                let mut count = 0.0f64;
+                for i in pos..=end {
+                    if i < self.length_counts.len() {
+                        count += self.length_counts[i];
+                    }
+                }
+                let label = if pos == end {
+                    format!("{}", pos)
+                } else {
+                    format!("{}-{}", pos, end)
+                };
+                distribution.push(serde_json::json!({
+                    "label": label,
+                    "count": crate::modules::json_num(count),
+                }));
+                pos = end + 1;
+            }
+        }
+
+        serde_json::json!({
+            "min_observed_length": min,
+            "max_observed_length": max,
+            "interval": interval,
+            "distribution": distribution,
+        })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         let min = self.min_length();
         let max = self.max_length();

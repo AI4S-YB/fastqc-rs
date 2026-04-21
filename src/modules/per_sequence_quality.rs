@@ -119,6 +119,39 @@ impl QcModule for PerSequenceQualityScores {
         }
     }
 
+    fn module_id(&self) -> &str {
+        "per_sequence_quality_scores"
+    }
+
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "warn": self.warn_threshold,
+            "error": self.error_threshold,
+        }))
+    }
+
+    fn json_data(&mut self, _config: &crate::config::Config) -> serde_json::Value {
+        self.calculate();
+        let encoding = PhredEncoding::from_lowest_char(self.lowest_char);
+        let offset = encoding.offset() as i32;
+        let mut scores: Vec<i32> = self.quality_distribution.keys().copied().collect();
+        scores.sort();
+        let distribution: Vec<serde_json::Value> = scores
+            .iter()
+            .map(|&s| {
+                serde_json::json!({
+                    "quality": s - offset,
+                    "count": crate::modules::json_num(self.quality_distribution[&s]),
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "encoding": encoding.to_string(),
+            "most_frequent_score": self.most_frequent_score - offset,
+            "distribution": distribution,
+        })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate();
         let encoding = PhredEncoding::from_lowest_char(self.lowest_char);

@@ -208,6 +208,46 @@ impl QcModule for OverRepresentedSeqs {
         }
     }
 
+    fn module_id(&self) -> &str {
+        "overrepresented_sequences"
+    }
+
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "warn": self.warn_threshold,
+            "error": self.error_threshold,
+        }))
+    }
+
+    fn json_data(&mut self, _config: &crate::config::Config) -> serde_json::Value {
+        self.calculate_overrepresented();
+        let data = self.shared.lock().unwrap();
+        let total_considered = data.count;
+        let unique = data.unique_sequence_count as u64;
+        let frozen = data.frozen;
+        let count_at_limit = data.count_at_unique_limit;
+        drop(data);
+        let records: Vec<serde_json::Value> = self
+            .overrepresented
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "sequence": s.seq,
+                    "count": s.count,
+                    "percentage": crate::modules::json_num(s.percentage),
+                    "possible_source": s.contaminant_hit,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "total_sequences_considered": total_considered,
+            "unique_sequence_count": unique,
+            "sampling_frozen": frozen,
+            "count_at_unique_limit": count_at_limit,
+            "records": records,
+        })
+    }
+
     fn make_report(&mut self, report: &mut ReportArchive) -> Result<()> {
         self.calculate_overrepresented();
 

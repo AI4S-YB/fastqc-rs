@@ -17,6 +17,15 @@ use crate::error::Result;
 use crate::report::ReportArchive;
 use crate::sequence::Sequence;
 
+/// Coerce a possibly non-finite f64 into a JSON-safe number (NaN/Inf → 0.0).
+pub(crate) fn json_num(v: f64) -> serde_json::Value {
+    if v.is_finite() {
+        serde_json::Value::from(v)
+    } else {
+        serde_json::Value::from(0.0f64)
+    }
+}
+
 /// Quality control module trait, equivalent to Java's QCModule interface.
 /// Requires Send for multi-threaded data-parallel processing.
 pub trait QcModule: Send {
@@ -36,6 +45,17 @@ pub trait QcModule: Send {
     /// Merge another module's accumulated state into this one.
     /// The `other` must be the same concrete type (obtained via `into_any`).
     fn merge(&mut self, other: Box<dyn std::any::Any + Send>);
+
+    /// Stable id for the structured JSON report (e.g. "basic_statistics").
+    fn module_id(&self) -> &str;
+
+    /// Build the module-specific `data` object for the structured JSON report.
+    fn json_data(&mut self, config: &Config) -> serde_json::Value;
+
+    /// Threshold block for the structured JSON report, if the module has one.
+    fn json_thresholds(&self) -> Option<serde_json::Value> {
+        None
+    }
 }
 
 /// Module threshold configuration, loaded from limits.txt.

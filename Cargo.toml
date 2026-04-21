@@ -1,6 +1,6 @@
 [package]
 name = "fastqc-rs"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2021"
 description = "A quality control tool for high throughput sequence data"
 license = "GPL-3.0"
@@ -24,6 +24,7 @@ memchr = "2"
 pulp = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
 noodles = { version = "0.109", features = ["bam", "sam", "bgzf", "core"] }
+serde_json = "1"
 
 # mimalloc is opt-in via the `mimalloc` feature.  Requires a C compiler
 # (cc/gcc/clang) which is available on all supported platforms (Linux, macOS,
