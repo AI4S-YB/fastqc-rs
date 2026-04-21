@@ -1,0 +1,40 @@
+context:
+  name: fastqc-rs
+  version: "0.13.0"
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  script:
+    - if: unix
+      then: cargo install --locked --root ${{ PREFIX }} --path . --no-track
+    - if: win
+      then: cargo install --locked --root %PREFIX% --path . --no-track
+
+requirements:
+  build:
+    - ${{ compiler("rust") }}
+    - ${{ compiler("c") }}
+  host:
+    - bzip2
+
+tests:
+  - script:
+      - fastqc-rs --help
+
+about:
+  homepage: https://github.com/AI4S-YB/fastqc-rs
+  repository: https://github.com/AI4S-YB/fastqc-rs
+  license: GPL-3.0-only
+  license_file: LICENSE
+  summary: A Rust implementation of FastQC for high-throughput sequence QC
+  description: |
+    A Rust implementation of FastQC, a quality control tool for high throughput
+    sequence data. 1:1 rewrite of FastQC v0.12.1 with identical output format
+    and analysis algorithms.

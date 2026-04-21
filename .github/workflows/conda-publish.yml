@@ -1,0 +1,52 @@
+# Publishes conda packages to the `ai4s-yb` channel on prefix.dev via OIDC
+# (trusted publisher). No API key is stored in the repo; prefix.dev verifies
+# the GitHub OIDC token.
+#
+# One-time setup on prefix.dev:
+#   https://prefix.dev/channels/ai4s-yb/settings/trusted-publishers
+#   - Owner: AI4S-YB
+#   - Repository: fastqc-rs
+#   - Workflow filename: conda-publish.yml
+
+name: Conda Publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required for OIDC trusted publishing
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-64,   os: ubuntu-latest }
+          - { target: osx-64,     os: macos-13 }
+          - { target: osx-arm64,  os: macos-14 }
+          - { target: win-64,     os: windows-latest }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build conda package
+        uses: prefix-dev/rattler-build-action@v0.2.34
+        with:
+          recipe-path: recipe/recipe.yaml
+          build-args: --target-platform=${{ matrix.target }} -c conda-forge
+
+      - name: Upload to prefix.dev (trusted publisher)
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          for file in output/**/*.conda; do
+            echo "Uploading $file"
+            rattler-build upload prefix -c ai4s-yb "$file"
+          done
