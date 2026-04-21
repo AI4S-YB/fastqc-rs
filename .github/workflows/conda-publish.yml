@@ -30,7 +30,8 @@ jobs:
           - { target: linux-64,   os: ubuntu-latest }
           - { target: osx-64,     os: macos-13 }
           - { target: osx-arm64,  os: macos-14 }
-          - { target: win-64,     os: windows-latest }
+          # win-64 needs MSVC activation for zstd-sys/cc; re-enable once
+          # the recipe has proper stdlib("c") + activation wired up.
 
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +40,14 @@ jobs:
         uses: prefix-dev/rattler-build-action@v0.2.34
         with:
           recipe-path: recipe/recipe.yaml
-          build-args: --target-platform=${{ matrix.target }} -c conda-forge
+          # Include the ai4s-yb channel so `--skip-existing=all` can check
+          # if this variant already exists upstream and skip the build
+          # (avoids re-uploading the same filename with different bytes).
+          build-args: >-
+            --target-platform=${{ matrix.target }}
+            -c conda-forge
+            -c https://prefix.dev/ai4s-yb
+            --skip-existing=all
 
       - name: Upload to prefix.dev (trusted publisher)
         if: github.event_name != 'pull_request'
@@ -47,7 +55,9 @@ jobs:
         run: |
           # macOS runners ship bash 3.2 which lacks `shopt -s globstar`,
           # so use `find` for cross-platform directory traversal.
-          find output -name "*.conda" -print | while IFS= read -r file; do
+          # If the build was skipped (package already exists), there are
+          # no *.conda files under output/ and this loop simply does nothing.
+          find output -name "*.conda" -print 2>/dev/null | while IFS= read -r file; do
             echo "Uploading $file"
             rattler-build upload prefix -c ai4s-yb "$file"
           done
