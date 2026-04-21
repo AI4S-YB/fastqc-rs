@@ -130,21 +130,15 @@ impl QcModule for BasicStats {
             }
         }
 
-        for c in seq.sequence.bytes() {
-            match c {
-                b'G' => self.g_count += 1,
-                b'A' => self.a_count += 1,
-                b'T' => self.t_count += 1,
-                b'C' => self.c_count += 1,
-                b'N' => self.n_count += 1,
-                _ => {}
-            }
-        }
-
-        for c in seq.quality.bytes() {
-            if c < self.lowest_char {
-                self.lowest_char = c;
-            }
+        let (a, c, g, t, n, min_q) =
+            crate::simd::count_bases_and_min_qual(seq.sequence.as_bytes(), seq.quality.as_bytes());
+        self.a_count += a;
+        self.c_count += c;
+        self.g_count += g;
+        self.t_count += t;
+        self.n_count += n;
+        if min_q < self.lowest_char {
+            self.lowest_char = min_q;
         }
     }
 

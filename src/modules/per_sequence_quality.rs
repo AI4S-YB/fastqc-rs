@@ -71,13 +71,10 @@ impl QcModule for PerSequenceQualityScores {
             return;
         }
 
-        for &c in qual {
-            if c < self.lowest_char {
-                self.lowest_char = c;
-            }
+        let (total, min_q) = crate::simd::sum_and_min_quality(qual);
+        if min_q < self.lowest_char {
+            self.lowest_char = min_q;
         }
-
-        let total: u64 = qual.iter().map(|&c| c as u64).sum();
         // Match Java FastQC's integer division semantics.
         let avg = (total as f64 / qual.len() as f64) as i32;
 

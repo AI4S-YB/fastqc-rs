@@ -4,3 +4,5 @@
 /fastqc/
 real-data
 benchmark_output/
+
+benches/bench_100k.fastq

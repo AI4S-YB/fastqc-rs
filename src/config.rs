@@ -48,6 +48,12 @@ pub struct Config {
     #[arg(short = 't', long = "threads", default_value = "1")]
     pub threads: usize,
 
+    /// Number of worker threads for processing modules within a single file.
+    /// Set to 1 to disable pipeline parallelism (useful for single-core environments).
+    /// Default: 4
+    #[arg(short = 'w', long = "workers", default_value = "4")]
+    pub workers: usize,
+
     /// Sets the base amount of memory, in Megabytes, used to process each file
     #[arg(long = "memory", default_value = "512")]
     pub memory: usize,
@@ -115,6 +121,7 @@ impl Config {
             adapter_file: None,
             limits_file: None,
             threads: 1,
+            workers: 4,
             memory: 512,
             kmer_size: None,
             quiet: false,

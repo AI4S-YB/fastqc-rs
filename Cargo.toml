@@ -19,8 +19,24 @@ thiserror = "2"
 rayon = "1"
 statrs = "0.17"
 ahash = "0.8"
+aho-corasick = "1"
+memchr = "2"
+pulp = "0.22"
+bytemuck = { version = "1", features = ["derive"] }
 noodles = { version = "0.109", features = ["bam", "sam", "bgzf", "core"] }
 serde_json = "1"
+
+# mimalloc is opt-in via the `mimalloc` feature.  Requires a C compiler
+# (cc/gcc/clang) which is available on all supported platforms (Linux, macOS,
+# FreeBSD).  Enable with: cargo build --release --features mimalloc
+[dependencies.mimalloc]
+version = "0.1"
+default-features = false
+optional = true
+
+[features]
+default = []
+mimalloc = ["dep:mimalloc"]
 
 [profile.release]
 lto = "fat"
@@ -30,3 +46,8 @@ opt-level = 3
 [dev-dependencies]
 tempfile = "3"
 pretty_assertions = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "simd_modules"
+harness = false

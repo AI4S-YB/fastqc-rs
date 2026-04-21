@@ -86,10 +86,6 @@ fn process_bam(
     Ok(file_name)
 }
 
-/// Number of worker threads for data-parallel module processing.
-/// Each worker gets its own module set and processes a subset of sequences.
-const NUM_WORKERS: usize = 4;
-
 /// Process FASTQ files using data-parallel pipeline:
 /// - 1 reader thread decompresses + parses FASTQ + tracks deduplication in file order
 /// - N worker threads each process sequences through their own module copies
@@ -108,6 +104,13 @@ fn process_fastq_pipeline(
         return process_fastq_sequential(path, config, modules);
     }
 
+    let num_workers = config.workers.max(1);
+
+    // If workers=1, skip pipeline overhead and run sequentially
+    if num_workers == 1 {
+        return process_fastq_sequential(path, config, modules);
+    }
+
     let module_config = ModuleConfig::load(config);
     let duplication_idx = modules
         .iter()
@@ -120,10 +123,10 @@ fn process_fastq_pipeline(
 
     let (reader_result, worker_results) = std::thread::scope(|s| {
         // Create per-worker channels
-        let mut worker_txs = Vec::with_capacity(NUM_WORKERS);
-        let mut worker_handles = Vec::with_capacity(NUM_WORKERS);
+        let mut worker_txs = Vec::with_capacity(num_workers);
+        let mut worker_handles = Vec::with_capacity(num_workers);
 
-        for _ in 0..NUM_WORKERS {
+        for _ in 0..num_workers {
             let (tx, rx) = mpsc::sync_channel::<Vec<Sequence>>(CHANNEL_BUFFER);
             worker_txs.push(tx);
 
@@ -170,7 +173,7 @@ fn process_fastq_pipeline(
                             if worker_txs[worker_idx].send(batch).is_err() {
                                 break;
                             }
-                            worker_idx = (worker_idx + 1) % NUM_WORKERS;
+                            worker_idx = (worker_idx + 1) % num_workers;
                             batch = Vec::with_capacity(BATCH_SIZE);
                         }
                     }
@@ -192,7 +195,7 @@ fn process_fastq_pipeline(
         let read_result = reader_handle.join().unwrap();
 
         // Collect worker results after the reader finishes and closes the channels.
-        let mut worker_results = Vec::with_capacity(NUM_WORKERS);
+        let mut worker_results = Vec::with_capacity(num_workers);
         for handle in worker_handles {
             worker_results.push(handle.join().unwrap());
         }
@@ -435,12 +438,12 @@ fn get_output_base(path: &Path, file_name: &str, config: &Config) -> String {
     }
 
     if let Some(ref dir) = config.output_dir {
-        format!("{}/{}", dir.display(), base)
+        dir.join(&base).to_string_lossy().into_owned()
     } else if let Some(parent) = path.parent() {
         if parent.to_string_lossy().is_empty() {
             base
         } else {
-            format!("{}/{}", parent.display(), base)
+            parent.join(&base).to_string_lossy().into_owned()
         }
     } else {
         base

@@ -1,3 +1,9 @@
+// mimalloc is opt-in (feature-gated).  Requires a C compiler on the build host.
+// Enable with: cargo build --release --features mimalloc
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::process;
 
 use clap::Parser;
