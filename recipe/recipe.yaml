@@ -19,7 +19,9 @@ build:
 
 requirements:
   build:
-    - ${{ compiler("rust") }}
+    # Cargo.lock uses v4 format (requires Rust >= 1.78); pin explicitly
+    # because conda-forge's rust-compiler variant can default to an older pin.
+    - rust >=1.80
     - ${{ compiler("c") }}
   host:
     - bzip2

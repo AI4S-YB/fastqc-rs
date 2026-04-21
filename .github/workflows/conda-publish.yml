@@ -45,8 +45,9 @@ jobs:
         if: github.event_name != 'pull_request'
         shell: bash
         run: |
-          shopt -s globstar nullglob
-          for file in output/**/*.conda; do
+          # macOS runners ship bash 3.2 which lacks `shopt -s globstar`,
+          # so use `find` for cross-platform directory traversal.
+          find output -name "*.conda" -print | while IFS= read -r file; do
             echo "Uploading $file"
             rattler-build upload prefix -c ai4s-yb "$file"
           done
