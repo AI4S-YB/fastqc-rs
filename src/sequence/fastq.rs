@@ -16,6 +16,11 @@ const IO_BUF_SIZE: usize = 256 * 1024;
 /// Block size for the record buffer (1 MB).
 const BLOCK_SIZE: usize = 1024 * 1024;
 
+/// Maximum buffer size (100 MB).  Protects against malformed files with
+/// extremely long lines (e.g. missing newlines) that would otherwise cause
+/// unbounded memory growth.
+const MAX_BUF_SIZE: usize = 100 * 1024 * 1024;
+
 /// Zero-copy FASTQ reader.
 ///
 /// Instead of 4 `String` allocations per record (id, seq, sep, qual),
@@ -113,6 +118,16 @@ impl FastqReader {
             self.pos = 0;
         }
         let target = (self.len + BLOCK_SIZE).max(self.len + needed);
+        if target > MAX_BUF_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "FASTQ line exceeds {} MB buffer limit (line {} — possible malformed file)",
+                    MAX_BUF_SIZE / (1024 * 1024),
+                    self.line_number + 1,
+                ),
+            ));
+        }
         if self.buf.len() < target {
             self.buf.resize(target, 0);
         }

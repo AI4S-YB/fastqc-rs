@@ -1,7 +1,6 @@
-// mimalloc is opt-in (feature-gated) and not available on Windows by default,
-// since `libmimalloc-sys` requires an external C toolchain there. Users who
-// want the allocator on Unix-like systems can enable the `mimalloc` feature.
-#[cfg(all(feature = "mimalloc", not(target_os = "windows")))]
+// mimalloc is opt-in (feature-gated).  Requires a C compiler on the build host.
+// Enable with: cargo build --release --features mimalloc
+#[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

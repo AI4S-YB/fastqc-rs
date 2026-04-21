@@ -99,7 +99,10 @@ impl AdapterContent {
         }
 
         let patterns: Vec<&str> = adapters.iter().map(|a| a.sequence.as_str()).collect();
-        let ac = AhoCorasick::new(&patterns).expect("Failed to build Aho-Corasick automaton");
+        let ac = AhoCorasick::builder()
+            .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+            .build(&patterns)
+            .expect("adapter patterns are valid ASCII — AhoCorasick build cannot fail");
 
         Self {
             adapters,
@@ -200,7 +203,7 @@ impl QcModule for AdapterContent {
             0
         };
 
-        for mat in self.ac.find_overlapping_iter(&seq.sequence) {
+        for mat in self.ac.find_iter(&seq.sequence) {
             let adapter_idx = mat.pattern().as_usize();
             if seen[adapter_idx] {
                 continue; // only first match per adapter matters

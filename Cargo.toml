@@ -25,11 +25,13 @@ pulp = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
 noodles = { version = "0.109", features = ["bam", "sam", "bgzf", "core"] }
 
-# mimalloc is opt-in via the `mimalloc` feature and gated off on Windows to
-# avoid requiring MSVC Build Tools / MinGW / clang-cl for the default build.
-# Enable with `cargo build --release --features mimalloc` on Unix-like hosts.
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-mimalloc = { version = "0.1", default-features = false, optional = true }
+# mimalloc is opt-in via the `mimalloc` feature.  Requires a C compiler
+# (cc/gcc/clang) which is available on all supported platforms (Linux, macOS,
+# FreeBSD).  Enable with: cargo build --release --features mimalloc
+[dependencies.mimalloc]
+version = "0.1"
+default-features = false
+optional = true
 
 [features]
 default = []

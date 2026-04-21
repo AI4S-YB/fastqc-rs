@@ -245,7 +245,6 @@ pub fn count_bases_per_position(
 
     // Unrolled: process 4 bases at a time to amortize loop overhead
     let chunks = seq.len() / 4;
-    let remainder = seq.len() % 4;
 
     for c in 0..chunks {
         let i = c * 4;
@@ -310,7 +309,7 @@ mod tests {
             3 => b'T',
             _ => b'N',
         }).collect();
-        let qual: Vec<u8> = (0..10000).map(|i| (33 + (i % 41) as u8)).collect();
+        let qual: Vec<u8> = (0..10000).map(|i| 33 + (i % 41) as u8).collect();
         let (a, c, g, t, n, min_q) = count_bases_and_min_qual(&seq, &qual);
         assert_eq!(a, 2000);
         assert_eq!(c, 2000);
@@ -346,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_sum_and_min_quality_long() {
-        let qual: Vec<u8> = (0..5000).map(|i| (33 + (i % 41) as u8)).collect();
+        let qual: Vec<u8> = (0..5000).map(|i| 33 + (i % 41) as u8).collect();
         let expected_sum: u64 = qual.iter().map(|&b| b as u64).sum();
         let expected_min: u8 = *qual.iter().min().unwrap();
         let (sum, min) = sum_and_min_quality(&qual);
