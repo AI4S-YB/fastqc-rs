@@ -211,8 +211,23 @@ Output format is compatible with Java FastQC v0.12.1:
 
 ## Citation
 
-If you use this project in academic work, please cite the original
-[FastQC](https://github.com/s-andrews/FastQC) release/publication.
+If you use this project in academic work, please cite:
+
+Xu ZG, Qin G. 2026. LLM-assisted development of Rust for high-performance bioinformatics software: practices, workflows, and boundaries. *Genomics Communications* 3: e018 doi: [10.48130/gcomm-0026-0018](https://doi.org/10.48130/gcomm-0026-0018)
+
+```bibtex
+@article{xu2026llm,
+  author  = {Xu, Zhou-Geng and Qin, Guihui},
+  title   = {LLM-assisted development of {Rust} for high-performance bioinformatics software: practices, workflows, and boundaries},
+  journal = {Genomics Communications},
+  volume  = {3},
+  pages   = {e018},
+  year    = {2026},
+  doi     = {10.48130/gcomm-0026-0018}
+}
+```
+
+Please also cite the original [FastQC](https://github.com/s-andrews/FastQC) release/publication.
 
 ## License
 
